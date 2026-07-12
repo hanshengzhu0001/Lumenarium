@@ -1,0 +1,44 @@
+defaults:
+  - _self_
+
+shared: &shared
+  gpt_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiJmZTQ1NjZlNi1jNGRkLTRjYTgtYTRlNS1hZGU1MThmMmU5OWMiLCJwcm9qZWN0X25hbWUiOiJQQ0ciLCJzZXJ2aWNlcyI6eyJnZW1pbmkiOjJ9LCJleHBpcmVzX2F0IjoiMjA3Ni0wNS0wOFQwNjoyMzozNi4wMTQ1NTcrMDA6MDBaIiwiaXNzdWVkX2F0IjoiMjAyNi0wNS0yMVQwNjoyMzozNi4wMTYxMzcrMDA6MDAifQ.8MmvBhbTdzUBotmciVp7MKh9wPxIA8IwCl7uDFzRyWc"
+  gpt_endpoint: "https://lightaiapi.lightspeed.qq.com/api/v1/gemini/stream"
+  gpt_model: "gemini-3.1-pro-preview"
+  ground_dino_token: "ffb5559f57f38aa3a648ab16957df2dc"
+  fbx_csv_path: "asset_data/imaginarium_asset_info.csv"
+  font_ttf_path: "utils/Arial.ttf"
+  assets_render_result_folder: &assets_folder "asset_data/imaginarium_assets_render_results"
+  background_texture_dataset_path: "asset_data/background_texture_dataset"
+  ori_dino_weights_path: "weights/dinov2_vitl14.pth"
+  enable_secondary_inspection: false
+  box_threshold: 0.1
+  hierarchical_traversal_times: 1
+
+S0_geometry_pred:
+  encoder: "vitl"
+  load_from: "weights/depth_anything_v2_metric_hypersim_vitl.pth"
+  max_depth: 20
+  save_parent_folder: "saved_results"
+  <<: *shared
+
+S1_scene_parsing:
+  <<: *shared
+
+S2_3d_retrieval:
+  asset_embedding_folder: "asset_data/imaginarium_assets_patch_embedding"
+  texture_embeddings_path: "asset_data/background_texture_dataset/texture_embeddings.pkl"
+  <<: *shared
+
+S3_pose_inference:
+  template_dir: *assets_folder
+  use_homography: "True"
+  ae_net_weights_path: "weights/ae_net_pretrained_weights.pth"
+  <<: *shared
+
+S4_blender_layout_and_corr:
+  placeable_area_info_folder: "asset_data/imaginarium_assets_internal_placement_space"
+  base_fbx_path: "asset_data/imaginarium_assets"
+  precomputed_voxel_dir: "asset_data/imaginarium_assets_voxels"
+  frame_length: 150
+  <<: *shared

@@ -1,0 +1,55 @@
+# ===== Python / caches =====
+__pycache__/
+*.pyc
+.cache/
+.DS_Store
+.vscode/
+.idea/
+.pytest_cache/
+.specstory/
+
+# ===== Data / models / third-party (large) =====
+asset_data/*
+weights/
+third_party/
+third_party/*
+logs/
+debug*
+
+# ===== Results / artifacts (symlinks & dirs) =====
+saved_results*
+batch_logs
+paper_30_visualization/
+*.blend
+*.blend1
+
+# ===== Result JSON / reports / logs / dashboards =====
+batch_results*.json
+eval_*.json
+*_report.json
+_obb_temp.json
+evaluation_dashboard.*
+*_evaluation_dashboard.json
+*.log
+
+# ===== Demo generated renders (keep only original demo_*.png) =====
+demo/*.png
+!demo/demo_0.png
+!demo/demo_1.png
+!demo/demo_2.png
+!demo/demo_3.png
+
+# ===== Large binaries =====
+*.pth
+*.tar*
+*.gz
+*.pdf
+
+# ===== Personal configs =====
+config/config_previous_dataset.yaml
+config/config.yaml
+
+# ===== Keep these (whitelist) =====
+!asset_data/imaginarium_asset_info.csv
+!config/config-example.yaml
+batch_process_images.sh

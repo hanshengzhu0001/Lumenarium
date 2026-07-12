@@ -1,0 +1,3 @@
+supermarket_01
+casino_01
+workshop_01

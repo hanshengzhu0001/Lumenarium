@@ -1,0 +1,12 @@
+diningroom_01
+diningroom_11
+livingroom_18
+livingroom_19
+streelitter_01
+streelitter_05
+workshop_01
+laundromat_01
+dental_office_01
+storge_01
+supermarket_01
+kitchen_01

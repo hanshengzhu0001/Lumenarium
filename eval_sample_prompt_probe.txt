@@ -1,0 +1,3 @@
+official_01
+kitchen_01
+waiting_room_01

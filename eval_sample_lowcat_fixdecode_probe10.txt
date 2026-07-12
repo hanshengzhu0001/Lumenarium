@@ -1,0 +1,10 @@
+laundromat_01
+laundromat_02
+supermarket_02
+supermarket_04
+streelitter_01
+streelitter_04
+diningroom_02
+diningroom_16
+livingroom_02
+livingroom_15

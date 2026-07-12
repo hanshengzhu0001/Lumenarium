@@ -1,0 +1,4 @@
+livingroom_02
+supermarket_01
+streelitter_01
+workshop_01

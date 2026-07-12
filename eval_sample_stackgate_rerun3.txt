@@ -1,0 +1,3 @@
+diningroom_01
+livingroom_18
+streelitter_01

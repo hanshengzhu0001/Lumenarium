@@ -1,0 +1,5 @@
+workshop_02
+bedroom_38
+computer_room_03
+diningroom_14
+bedroom_14

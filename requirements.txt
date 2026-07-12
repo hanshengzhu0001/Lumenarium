@@ -1,0 +1,53 @@
+# Core Framework
+torch==2.7.0
+torchvision==0.22.0
+numpy
+pandas
+pytorch_lightning
+
+# Computer Vision & Image Processing
+opencv-python
+Pillow
+scikit-image
+scikit-learn
+pycocotools
+matplotlib
+imageio
+
+# 3D Processing
+open3d>=0.18.0
+trimesh>=4.4.0
+
+# Deep Learning Models
+transformers
+diffusers
+peft
+bitsandbytes
+timm
+einops
+accelerate
+xformers
+sentencepiece
+protobuf
+
+# Data & HuggingFace Ecosystem
+datasets
+huggingface_hub
+packaging
+
+# API & LLM
+openai
+
+# Configuration & Utilities
+omegaconf
+hydra-core
+tqdm
+requests
+easydict
+scipy
+wandb
+pyyaml
+termcolor
+networkx
+rich
+typing_extensions

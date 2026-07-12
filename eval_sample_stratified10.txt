@@ -1,0 +1,10 @@
+bedroom_01
+diningroom_01
+supermarket_01
+streelitter_01
+bathroom_01
+kitchen_01
+waiting_room_01
+casino_01
+computer_room_01
+official_01
