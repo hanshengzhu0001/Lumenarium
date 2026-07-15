@@ -48,6 +48,7 @@ demo/*.png
 # ===== Personal configs =====
 config/config_previous_dataset.yaml
 config/config.yaml
+config/.env
 
 # ===== Keep these (whitelist) =====
 !asset_data/imaginarium_asset_info.csv
