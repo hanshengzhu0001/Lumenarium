@@ -2,10 +2,10 @@ defaults:
   - _self_
 
 shared: &shared
-  gpt_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlfaWQiOiJmZTQ1NjZlNi1jNGRkLTRjYTgtYTRlNS1hZGU1MThmMmU5OWMiLCJwcm9qZWN0X25hbWUiOiJQQ0ciLCJzZXJ2aWNlcyI6eyJnZW1pbmkiOjJ9LCJleHBpcmVzX2F0IjoiMjA3Ni0wNS0wOFQwNjoyMzozNi4wMTQ1NTcrMDA6MDBaIiwiaXNzdWVkX2F0IjoiMjAyNi0wNS0yMVQwNjoyMzozNi4wMTYxMzcrMDA6MDAifQ.8MmvBhbTdzUBotmciVp7MKh9wPxIA8IwCl7uDFzRyWc"
+  gpt_key: ${GPT_API_KEY}
   gpt_endpoint: "https://lightaiapi.lightspeed.qq.com/api/v1/gpt/call"
   gpt_model: "gpt-5.4"
-  ground_dino_token: "ffb5559f57f38aa3a648ab16957df2dc"
+  ground_dino_token: ${GROUND_DINO_TOKEN}
   fbx_csv_path: "asset_data/imaginarium_asset_info.csv"
   font_ttf_path: "utils/Arial.ttf"
   assets_render_result_folder: &assets_folder "asset_data/imaginarium_assets_render_results"
