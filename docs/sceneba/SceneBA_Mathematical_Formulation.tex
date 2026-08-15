@@ -1,0 +1,269 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm,booktabs,array,microtype,hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\SE}{\mathrm{SE}}
+\newcommand{\Diag}{\operatorname{Diag}}
+\newcommand{\SceneBA}{\textsc{SceneBA}}
+\title{\SceneBA：不确定性感知的离散--连续场景束调整\\
+\large 数学建模与可实现推导}
+\author{Lumenarium Research}
+\date{2026年7月30日\quad v0.2}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+\SceneBA 将单图三维场景重建从串行的``解析--检索--姿态--布局''流水线，
+改写为离散场景假设与连续几何参数的联合后验推断。本文明确变量、因子图、
+对称旋转、连续条件优化、Laplace 边缘证据、受限离散搜索，以及可证伪的
+Top-$K$ oracle 实验。当前推导足以实现 oracle audit 和 bounded-beam 原型；
+因子权重、候选阈值与统计非劣界仍须在独立开发集上标定。
+\end{abstract}
+
+\section{符号：$T_i,R_i,S_i$ 到底是什么？}
+对第 $i$ 个物体，定义离散状态与连续状态
+\begin{equation}
+ z_i=(A_i,G_i,Q_i),\qquad
+ x_i=(T_i,R_i,\ell_i),\qquad \ell_i=\log S_i .
+\end{equation}
+各符号含义如下。
+\begin{itemize}
+  \item $A_i$：资产身份，即 local/DeepSearch Top-$K$ 候选中的某个三维模型。
+  \item $G_i=(P_i,\rho_i)$：场景图状态，其中 $P_i$ 是 parent/support，
+  $\rho_i$ 是 \texttt{on}、\texttt{inside}、\texttt{wall}、\texttt{hang} 等关系。
+  \item $Q_i$：离散姿态或对称模式，例如椅子的正反候选、四重旋转等价类。
+  \item $T_i=(t_x,t_y,t_z)^\top\in\mathbb R^3$：物体局部原点在世界坐标系中的
+  三维平移，单位通常为米。
+  \item $R_i\in\SO(3)$：物体局部坐标系到世界坐标系的三维旋转矩阵，
+  满足 $R_i^\top R_i=I,\det R_i=1$。
+  \item $S_i=(s_x,s_y,s_z)^\top\in\mathbb R_{>0}^3$：沿三个局部轴的正尺度；
+  等比例缩放是 $S_i=s_i\bm 1$。优化 $\ell_i=\log S_i$ 可自动保证尺度为正。
+\end{itemize}
+因此，物体到世界坐标的齐次变换为
+\begin{equation}
+ M_i(T_i,R_i,S_i)=
+ \begin{bmatrix}
+ R_i\Diag(S_i)&T_i\\
+ \bm 0^\top&1
+ \end{bmatrix}.
+\end{equation}
+对局部点 $v\in\mathbb R^3$，其世界坐标是
+\begin{equation}
+ v^{\mathrm w}=R_i\Diag(S_i)v+T_i.
+\end{equation}
+可选全局变量包括相机 $C$、深度尺度 $\alpha_d$、地面平面 $\pi_f$ 和墙面集合
+$\Pi$，合记为 $\gamma=(C,\alpha_d,\pi_f,\Pi)$。
+
+\section{对称感知旋转}
+设资产 $A_i$ 的有限旋转对称群为 $H_{A_i}\subset\SO(3)$。物理姿态不是单个
+$R_i$，而是商空间中的等价类
+\begin{equation}
+ [R_i]=\{R_i h:h\in H_{A_i}\}\in\SO(3)/H_{A_i}.
+\end{equation}
+对参考旋转 $\widehat R_i$，定义
+\begin{equation}
+ d_{\mathrm{sym}}(R_i,\widehat R_i;A_i)
+ =\min_{h\in H_{A_i}}
+ \left\|\operatorname{Log}\!\left(\widehat R_i^\top R_i h\right)^\vee
+ \right\|_2 .
+\end{equation}
+其中 $\operatorname{Log}:\SO(3)\to\mathfrak{so}(3)$，$(\cdot)^\vee$ 将反对称矩阵
+还原为旋转向量。连续更新使用李代数局部参数
+\begin{equation}
+ R_i(\delta\omega_i)=R_i^{(0)}
+ \operatorname{Exp}([\delta\omega_i]_\times).
+\end{equation}
+当前系统可以先采用 yaw-only 的一维版本；完整 $\SO(3)$ 版本不改变离散建模。
+
+\section{后验分布与因子图}
+令观测
+\begin{equation}
+ y=(I,D,\mathcal M,\Phi)
+\end{equation}
+包含输入图像、深度、实例掩码与缓存的 foundation features。对
+$z=(z_1,\ldots,z_N)$、$x=(x_1,\ldots,x_N)$，定义
+\begin{equation}
+ p(z,x,\gamma\mid y)
+ =\frac{1}{Z(y)}p(z)\,p(x,\gamma\mid z)
+ \prod_{f\in\mathcal F}\psi_f(z_f,x_f,\gamma;y).
+\end{equation}
+取负对数得到能量
+\begin{equation}
+ E(z,x,\gamma;y)
+ =-\log p(z)-\log p(x,\gamma\mid z)
+ +\sum_{f\in\mathcal F}E_f(z_f,x_f,\gamma;y),
+ \quad E_f=-\log\psi_f .
+\end{equation}
+联合 MAP 为
+\begin{equation}
+ (z^\star,x^\star,\gamma^\star)
+ =\arg\min_{z,x,\gamma}E(z,x,\gamma;y).
+\end{equation}
+
+\section{观测、先验和物理因子}
+\subsection{图像与深度}
+设 $\widehat M_i$ 是渲染掩码、$M_i$ 是观测掩码：
+\begin{align}
+ E_{\mathrm{sil},i}
+ &=1-\operatorname{IoU}(\widehat M_i,M_i),\\
+ E_{\mathrm{feat},i}
+ &=\frac1{|\Omega_i|}\sum_{u\in\Omega_i}
+ \rho\!\left(1-
+ \cos(\widehat\Phi_i(u),\Phi_I(u))\right),\\
+ E_{\mathrm{depth},i}
+ &=\frac1{|\Omega_i|}\sum_{u\in\Omega_i}w_i(u)
+ \rho\!\left(\log\widehat D_i(u)-\log(\alpha_dD(u))\right).
+\end{align}
+两物体投影重叠时，可加入遮挡顺序因子
+\begin{equation}
+ E_{\mathrm{occ},ij}
+ =\frac1{|\Omega_{ij}|}\sum_{u\in\Omega_{ij}}
+ \rho\!\left(s_{ij}(u)
+ [\widehat D_i(u)-\widehat D_j(u)]\right),
+\end{equation}
+其中 $s_{ij}(u)\in\{-1,+1\}$ 编码观测到的前后关系。
+
+\subsection{资产、图结构和初始化先验}
+\begin{align}
+ E_{\mathrm{ret},i}(A_i)
+ &=-\log p_{\mathrm{ret}}(A_i\mid I,M_i,\text{label}_i),\\
+ E_{\mathrm{graph},i}(G_i)
+ &=-\log p(P_i,\rho_i\mid\text{S1 evidence}),\\
+ E_{\mathrm{init},i}
+ &=\frac12(x_i-\mu_i)^\top\Sigma_i^{-1}(x_i-\mu_i).
+\end{align}
+支撑图限制为有根有向森林：普通物体至多有一个结构 parent，且禁止有向环。
+$\Sigma_i$ 大表示 S3 不确定、允许较大修正；$\Sigma_i$ 小则保护可靠初始化。
+
+\subsection{物理与语义因子}
+复用已经验证的 LayoutVLM 因子：
+\begin{equation}
+ E_{\mathrm{phys}}
+ =\lambda_cE_{\mathrm{collision}}
+ +\lambda_sE_{\mathrm{contact}}
+ +\lambda_pE_{\mathrm{plane}}
+ +\lambda_bE_{\mathrm{boundary}}
+ +\lambda_mE_{\mathrm{semantic}}.
+\end{equation}
+语义项包含 gated containment、\texttt{align\_with}、\texttt{point\_towards}
+和有向距离。contact、plane、containment 和 boundary 的硬约束可通过
+投影算子 $\Pi_{\mathcal C}$ 保持可行：
+\begin{equation}
+ x^{k+1}
+ =\Pi_{\mathcal C(z)}
+ \left(x^k-\eta_k\nabla_xE(z,x^k,\gamma^k;y)\right).
+\end{equation}
+
+\subsection{总能量}
+\begin{align}
+ E={}&\sum_i\big[
+ \lambda_{\mathrm{sil}}E_{\mathrm{sil},i}
+ +\lambda_{\mathrm{feat}}E_{\mathrm{feat},i}
+ +\lambda_dE_{\mathrm{depth},i}
+ +\lambda_{\mathrm{ret}}E_{\mathrm{ret},i}\nonumber\\
+ &\qquad+\lambda_{\mathrm{init}}E_{\mathrm{init},i}
+ +\lambda_gE_{\mathrm{graph},i}\big]
+ +\sum_{i<j}\lambda_oE_{\mathrm{occ},ij}
+ +E_{\mathrm{phys}}.
+\end{align}
+训练或验证时必须单独报告各原始因子，不能把内部加权总能量当作唯一质量指标。
+
+\section{为什么不能只按优化后的最小 loss 排名？}
+对固定离散假设 $z$，令 $u=(x,\gamma)$ 且
+\begin{equation}
+ \widehat u_z=\arg\min_u E(z,u;y).
+\end{equation}
+我们真正需要比较的是边缘后验
+\begin{equation}
+ p(z\mid y)=\int p(z,u\mid y)\,du,
+\end{equation}
+而非单点密度。令
+\begin{equation}
+ H_z=\left.\nabla_u^2E(z,u;y)\right|_{u=\widehat u_z}.
+\end{equation}
+在局部极小值处二阶展开：
+\begin{equation}
+ E(z,u;y)\approx E(z,\widehat u_z;y)
+ +\frac12(u-\widehat u_z)^\top H_z(u-\widehat u_z).
+\end{equation}
+高斯积分给出 Laplace 近似
+\begin{align}
+ p(z\mid y)
+ &\approx \frac{1}{Z(y)}
+ \exp[-E(z,\widehat u_z;y)]
+ (2\pi)^{d_z/2}\det(H_z+\lambda I)^{-1/2},\\
+ \log p(z\mid y)
+ &\approx -E(z,\widehat u_z;y)
+ -\frac12\log\det(H_z+\lambda I)
+ +\frac{d_z}{2}\log(2\pi)+C.
+\end{align}
+如果 $E$ 的定义没有吸收离散先验，则须额外加 $\log p(z)$。为避免重复计数，
+本文统一采用以下实现约定：
+\begin{equation}
+ E(z,u;y)=E_{\mathrm{likelihood}}+E_{\mathrm{continuous\ prior}},
+\end{equation}
+并将离散先验单独保留。于是排序分数为
+\begin{equation}
+ \boxed{
+ \mathcal S(z)=
+ -E(z,\widehat u_z;y)
+ -\frac12\log\det(H_z+\lambda I)
+ +\log p(z)
+ +\frac{d_z}{2}\log(2\pi)}
+\end{equation}
+且越大越好；等价成本 $\mathcal C(z)=-\mathcal S(z)$ 越小越好。
+
+曲率项是 Occam factor：低 loss 但极尖锐、脆弱的解具有更小的积分体积；
+在较宽连续区域内都能解释观测的假设更可信。$\lambda>0$ 处理规范自由度和平坦模态。
+不同维数的假设必须保留 $d_z\log(2\pi)/2$ 并使用一致先验测度。
+
+\paragraph{近似计算。}
+第一版无需构造稠密 Hessian。若残差向量为 $r(u)$、Jacobian 为 $J$，可用
+\begin{equation}
+ H_z\approx J^\top WJ+\lambda I
+\end{equation}
+的 Gauss--Newton 近似；再用稀疏 Cholesky、对角近似，或 stochastic Lanczos
+估计 $\log\det H_z$。必须通过 ablation 比较 raw minimum、diagonal evidence
+与更精确 evidence。
+
+\section{受限的离散--连续推断}
+完整枚举是组合爆炸，采用保留 incumbent 的不确定性门控 beam search：
+\begin{enumerate}
+  \item 从当前 Top-1 流水线结果初始化。
+  \item 用 retrieval margin、parent entropy、symmetry ambiguity、渲染残差和
+  物理残差计算风险。
+  \item 选取最高风险物体及其 parent/children 构成局部 active subgraph。
+  \item 提出 Top-3 assets、Top-2 parents 与少量 symmetry modes。
+  \item 每个提案进行 30--50 步条件连续优化。
+  \item 用 Laplace evidence 排名，保留 4--8 个 beam states。
+  \item 冻结低风险子图，直到证据增益或算力预算耗尽。
+  \item 对获胜状态运行 LayoutVLM400，或后续使用 $\{30,100,400\}$ router。
+\end{enumerate}
+保留 incumbent 可保证已评估 surrogate/evidence 不变差，但不保证 GT 指标单调提高。
+
+\section{可辨识性、适用边界与实验闭环}
+单视图中尺度和深度可互换，遮挡几何弱可观，对称物体存在多解。因此需要：
+metric depth 或 floor/support priors、显式对称商空间、概率校准、初始化协方差，
+以及对多模态后验的报告。
+
+在实现完整求解器前，必须执行：
+\begin{enumerate}
+  \item asset Recall@$1/3/5/10$ 与 MRR；
+  \item parent Recall@$1/2$；
+  \item symmetry-aware pose oracle；
+  \item asset-only、parent-only、symmetry-only 和 joint oracle；
+  \item GT-free verifier 能恢复多少 oracle gap。
+\end{enumerate}
+建议 go/no-go 条件为 Recall@5 相比 Recall@1 至少提高 10 个百分点，或 joint oracle
+使 rotation AUC 提高 0.05、translation AUC 提高 0.03、parent accuracy 提高 0.05
+中的任意一项成立。最终求解器应恢复至少 40\% 的 oracle gap，展开不超过约
+25--30\% 的物体，运行时间不超过 LayoutVLM400 的两倍。
+
+\section{当前可以声称什么}
+当前数学定义已经闭合并足以编码：变量域明确，后验和能量一致，对称性被商空间处理，
+固定离散状态下的连续优化与离散边缘比较均有定义，搜索预算有界，并有可证伪实验。
+但它还不是已被实验验证的最终算法。Top-$K$ 覆盖率、evidence 排名能力、因子权重和
+SceneBA 对 Paper30 的真实增益仍需实验确定。
+
+\end{document}

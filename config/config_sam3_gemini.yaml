@@ -2,10 +2,10 @@ defaults:
   - _self_
 
 shared: &shared
-  gpt_key: ${GPT_API_KEY}
+  gpt_key: ${oc.env:GPT_API_KEY}
   gpt_endpoint: "https://lightaiapi.lightspeed.qq.com/api/v1/gemini/stream"
-  gpt_model: ${GPT_MODEL:gemini-3.1-pro-preview}
-  ground_dino_token: ${GROUND_DINO_TOKEN}
+  gpt_model: ${oc.env:GPT_MODEL,gemini-3.1-pro-preview}
+  ground_dino_token: ${oc.env:GROUND_DINO_TOKEN}
   fbx_csv_path: "asset_data/imaginarium_asset_info.csv"
   font_ttf_path: "utils/Arial.ttf"
   assets_render_result_folder: &assets_folder "asset_data/imaginarium_assets_render_results"

@@ -1,116 +1,369 @@
-╔══════════════════════════════════════════════════════════════════════════════════╗
-║      Imaginarium v1/v3 — Paper30 Evaluation Dashboard (SAM3, GPT-5.2)           ║
-║      2026-07-10 | v1+v3: 30/30 complete | stacking-aware vs baseline             ║
-║      Eval: mask≥8000 (→ 322 GT, ~11/scene, matches paper ~15)                   ║
-╚══════════════════════════════════════════════════════════════════════════════════╝
++------------------------------------------------------------------------------+
+| IMAGINARIUM PAPER30 - CROSS-VERSION EVALUATION DASHBOARD                     |
+| Updated: 2026-08-11                                                          |
++------------------------------------------------------------------------------+
 
+EVALUATION PROTOCOL
+-------------------
+Dataset             Paper30 (30 scenes)
+GT source           imaginarium_3d_scene_layout_dataset/*_detect_items.pkl
+Visible mask filter min-visible-mask-area = 8000 px
+Visible bbox filter min-visible-bbox-size = 0 px
+Pose alignment      Scene-level translation/rotation recovery evaluation
+Primary metrics     Recovery, Parent Accuracy, Rotation AUC@60deg,
+                    Translation AUC@0.5m
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  EVAL METHODOLOGY                                                                 │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  GT source:       asset_data/imaginarium_3d_scene_layout_dataset/*_meta.json     │
-│  GT filtering:    min-visible-mask-area = 8000px  (≈0.8% of 1024² image)         │
-│                   min-visible-bbox-size = 8px                                     │
-│  Why 8000px?      Paper evaluates ~15 "key foreground objects" per scene.         │
-│                   8000px threshold (≈90×90px object) isolates medium-large        │
-│                   foreground objects (beds, sofas, chairs, tables).              │
-│                   → 322 GT across 30 scenes = ~11/scene (close to paper's ~15).  │
-│                   Tiny objects (pens, books, clutter) excluded as in paper.      │
-│  Object matching: min-match-score=0.34, canonical synonym groups (20 categories) │
-│  Parent matching: semantic_class (compare class_en labels via synonyms)          │
-│  Pose scoring:    scene-level Umeyama similarity transform (aligned)             │
-│                   Rotation AUC@60°, Translation AUC@0.5m                         │
-│  Versions tested: v1=baseline(no stacking), v3=stacking-aware                    │
-│  Both use:        GPT-5.2, SAM3 detection, identical S1/S2/S3/S4 prompt          │
-│  Paper Table 3:   Primary Recovery = 92.31% (with Flux fine-tune + GPT-4o)       │
-└──────────────────────────────────────────────────────────────────────────────────┘
+SCENEPROOF FINAL PAPER30 COMPARISON (2026-08-11)
+------------------------------------------------
+Common source       v4_deepsearch S3 geometry and source-S3 locked camera
+Reference version   v5_sceneproof_collision_partial_commit_certified_paper30_fix61
+Final method        v5_sceneproof_vertical_support_visual_paper30_fix114
+Scenes              30/30 for both versions; evaluator failures = 0
 
++--------------------------+----------------------+----------------------+----------------+
+| Metric                   | Fix61 baseline       | Fix114 final         | Fix114 - Fix61 |
++--------------------------+----------------------+----------------------+----------------+
+| Modified objects         | frozen reference     | 23 in 12 scenes      | +23            |
+| Physical macro           | reference (0 delta)  | reference + delta    | +0.000376052   |
+| Collision                | reference (0 delta)  | improved             | +0.004392575   |
+| Support (legacy proxy)   | reference (0 delta)  | lower                | -0.004431574   |
+| Plane                    | reference (0 delta)  | unchanged            | +0.000000000   |
+| Semantic                 | reference (0 delta)  | numerically same     | -0.000000002   |
+| Failures                 | 0                    | 0                    | 0              |
++--------------------------+----------------------+----------------------+----------------+
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  OVERALL METRICS: Paper vs Imaginarium v1(baseline) vs v3(stacking-aware)         │
-│  Eval on medium+ foreground (mask ≥ 8000px), 322 GT objects, 30 scenes           │
-├───────────────────────────────┬──────────────┬──────────────┬──────────────┬──────┤
-│  Metric (Primary objects)     │  Paper Tab.3 │  v1 baseline │  v3 stacking  │ v3>v1│
-│                               │  (Flux+4o)   │   (GPT-5.2)  │   (GPT-5.2)  │ Conf │
-├───────────────────────────────┼──────────────┼──────────────┼──────────────┼──────┤
-│  Benchmark size               │  39 scenes   │  **30/30**    │  **30/30**    │  —   │
-│  GT objects evaluated         │  ~15/scene   │  322 (11/scn) │  322 (11/scn) │  —   │
-│  Object Recovery (Primary)    │  **92.31%**  │  87.88%       │  **91.08%**   │ ★★★  │
-│                               │              │               │  **+3.20%**   │>95%  │
-│  Parent Accuracy (Primary)    │  NOT reported│  91.43%       │  **93.94%**   │ ★★☆  │
-│                               │              │               │  **+2.51%**   │92.5% │
-│  Rotation AUC@60° (Primary)   │  **74.83%**  │  44.40%       │  45.94%       │  —   │
-│                               │              │               │  +1.54%       │69%   │
-│  Translation AUC@0.5m (Prim)  │  **84.32%**  │  **21.72%**   │  20.63%       │  —   │
-│                               │              │               │  -1.09%       │32%   │
-├───────────────────────────────┼──────────────┼──────────────┼──────────────┼──────┤
-│  Conf = bootstrap significance (H₀: v3 ≤ v1). ★★★ p<0.05 | ★★☆ p<0.10 | ★ p<0.25│
-│  v3 recovery improvement is statistically significant (p=0.007, bootstrapped).    │
-│  Rotation/translation lower than paper — paper uses Flux+GPT-4o, ours uses GPT-5.2│
-│  without Flux fine-tuning. Gap is expected methodology difference.               │
-└──────────────────────────────┴──────────────┴──────────────┴──────────────┴──────┘
+Interpretation
+  Fix114 is an incremental extension of Fix61 and therefore inherits the
+  accepted SceneLM/SceneProof pipeline: independent full SO(3), guarded local
+  optimization, collision partial commit, component certificates, rollback,
+  and the established pose/runtime result. It adds generic true-mesh vertical
+  first-contact support repair with per-object transactional acceptance.
 
+Paper positioning
+  Main method / final visual output: Fix114.
+  Required ablation / quantitative anchor: Fix61 (Fix114 without the final
+  true-mesh vertical-support repair).
+  Claim aggregate physical non-inferiority and collision improvement. Do not
+  claim every family improves: the legacy OBB support proxy drops by 0.443 pp.
+  Report this openly and explain that Fix114 optimizes certified true-mesh
+  contact while the legacy support family remains a proxy metric.
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  ALGORITHM CHANGES vs Original Paper                                              │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  1. SAM3 text-based detection     Replaces GroundingDINO 1.5 + SAM               │
-│  2. Category merging map          Token-boundary synonym injection                │
-│  3. Stacking awareness (v3)       Multi-source geometric stacking detection       │
-│  4. SA optimization tuning        α=0.95, iters=1000/500                         │
-│  5. Low-recall targeted pass      Re-detection for historically-low-recall cats   │
-│  6. VLM: GPT-5.2 + SAM3          Both v1 and v3 share identical S1 prompt        │
-│  7. No Flux fine-tuning           Demo images directly (not generated)            │
-└──────────────────────────────────────────────────────────────────────────────────┘
+PRIMARY OBJECT METRICS
+----------------------
++----------------------+----------------+----------------+----------------+------+
+| Metric               | v1             | v3             | v4-deepsearch  | v4   |
++----------------------+----------------+----------------+----------------+------+
+| Evaluation source    | 2026-07-27     | previous run   | 2026-07-28     | 07-29|
+| Scenes completed     | 30/30          | 30/30          | 30/30          | 30/30|
+| Recovery             | 89.49%         | 91.08%         | 88.22%         |88.22%|
+| Parent accuracy      | 89.32%         | 93.94%         | 80.14%         |80.14%|
+| Rotation AUC@60deg   | 48.13%         | 45.94%         | 31.34%         |30.45%|
+| Translation AUC@0.5m | 23.73%         | 20.63%         | 12.19%         |11.41%|
++----------------------+----------------+----------------+----------------+------+
 
+OVERALL MATCHING METRICS
+------------------------
++----------------------+----------------+----------------+----------------+------+
+| Metric               | v1             | v3             | v4-deepsearch  | v4   |
++----------------------+----------------+----------------+----------------+------+
+| Matched / GT         | 307 / 363      | previous only  | 302 / 363      |302/363|
+| Match rate           | 84.57%         | previous only  | 83.20%         |83.20%|
+| Parent accuracy      | 83.06%         | previous only  | 74.83%         |74.83%|
+| Rotation AUC@60deg   | 48.98%         | previous only  | 31.16%         |30.28%|
+| Translation AUC@0.5m | 22.22%         | previous only  | 10.95%         |10.16%|
++----------------------+----------------+----------------+----------------+------+
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  STACKING-AWARE vs BASELINE: Per-metric analysis (mask≥8000, 322 GT)              │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  Primary Recovery (+3.2%, p=0.007):  Statistically significant.                   │
-│    → v3 finds +8 more objects than v1. Stacking prevents objects from being      │
-│      dropped/lost during SA layout optimization.                                 │
-│                                                                                   │
-│  Parent Accuracy (+2.5%, p=0.075):  Marginally significant.                       │
-│    → Stacking-aware parent resolution reduces GPT floor-attribution errors.       │
-│    → 30 scenes underpowered for this metric.                                     │
-│                                                                                   │
-│  Rotation (+1.5%, n.s.):  Within noise. Rotation not affected by stacking.        │
-│                                                                                   │
-│  Translation (-1.1%, n.s.):  Slightly worse. Wall-mounted objects still clip.     │
-│    → Current eval doesn't penalize wall penetration. Plan: L_against_wall.        │
-│                                                                                   │
-│  Bottom line: Stacking significantly improves object recovery (confirmed by       │
-│  bootstrap p=0.007). Parent accuracy trending positive. Pose metrics unaffected.  │
-└──────────────────────────────────────────────────────────────────────────────────┘
+V1 DETAIL - CURRENT PAPER30 RUN
+-------------------------------
+Matched / eligible GT          307 / 363
+Overall parent accuracy        0.8306188925
+Overall rotation AUC@60deg     0.4898398160
+Overall translation AUC@0.5m   0.2221698182
 
+Primary recovery               0.8949044586
+Primary parent accuracy        0.8932384342
+Primary rotation AUC@60deg     0.4813169216
+Primary translation AUC@0.5m   0.2373076247
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  KEY INSIGHTS                                                                     │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  1. SAM3 detection is the main driver — both v1 and v3 beat paper benchmark      │
-│  2. Stacking significantly improves recovery: +3.2% (p=0.007 ★★★)                 │
-│  3. Parent improvement (+2.5%) is directionally clear but needs more scenes       │
-│  4. Rotation/translation lower than paper — we lack Flux fine-tune (paper: +30%)  │
-│  5. Wall-clipping still present — future: LayoutVLM diff-opt with L_against_wall  │
-└──────────────────────────────────────────────────────────────────────────────────┘
+Secondary recovery             0.5306122449
+Secondary parent accuracy      0.1538461538
+Secondary rotation AUC@60deg   0.7195858326
+Secondary translation AUC@0.5m 0.3983516427
 
+V4-DEEPSEARCH DETAIL - CURRENT PAPER30 RUN
+------------------------------------------
+S1 / S2 / S4 objects          1949 / 1949 / 1823
+S2 retention                  100.00%
+S4 retention                   93.53%
+Matched / eligible GT          302 / 363
+Overall parent accuracy        0.7483443709
+Overall rotation AUC@60deg     0.3116137809
+Overall translation AUC@0.5m   0.1094706074
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  VERDICT                                                                          │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  v3 stacking-aware (GPT-5.2+SAM3): Primary recovery 91.1% — near paper's 92.3%   │
-│  v1 baseline     (GPT-5.2+SAM3): Primary recovery 87.9% — solid baseline         │
-│                                                                                   │
-│  Key result: stacking-aware v3 significantly improves recovery over v1 (+3.2%).   │
-│  This is the only statistically significant improvement (bootstrap p=0.007).     │
-│                                                                                   │
-│  Gap to paper (92.3% vs 91.1%): paper uses Flux fine-tuned images + GPT-4o.      │
-│  Our GPT-5.2 pipeline without Flux achieves comparable results — remarkable.      │
-│                                                                                   │
-│  Next: LayoutVLM differentiable optimization for wall/translation fixes.          │
-│                                                                                   │
-│  Backup: /mnt/kevinzyz/artifacts/Imaginarium-repo/backups/                        │
-│  v1: v1_fresh_gpt52_20260709_0022.tar.gz (2.3G)                                   │
-│  v3: v3_fair_gpt52_20260709_0058.tar.gz (1.3G)                                    │
-└──────────────────────────────────────────────────────────────────────────────────┘
+Primary recovery               0.8821656051
+Primary parent accuracy        0.8014440433
+Primary rotation AUC@60deg     0.3134009134
+Primary translation AUC@0.5m   0.1219499809
+
+Secondary recovery             0.5102040816
+Secondary parent accuracy      0.1600000000
+Secondary rotation AUC@60deg   0.5863140668
+Secondary translation AUC@0.5m 0.2955270921
+
+V4 FULL-400 DETAIL - CURRENT PAPER30 RUN
+----------------------------------------
+S1 / S2 / S4 objects          1949 / 1949 / 1823
+S2 retention                  100.00%
+S4 retention                   93.53%
+Matched / eligible GT          302 / 363
+Overall parent accuracy        0.7483443709
+Overall rotation AUC@60deg     0.3028207489
+Overall translation AUC@0.5m   0.1016196499
+
+Primary recovery               0.8821656051
+Primary parent accuracy        0.8014440433
+Primary rotation AUC@60deg     0.3044769849
+Primary translation AUC@0.5m   0.1140979729
+
+Secondary recovery             0.5102040816
+Secondary parent accuracy      0.1600000000
+Secondary rotation AUC@60deg   0.5848154987
+Secondary translation AUC@0.5m 0.2955856080
+
+PAIRED S4 EFFECT: FULL-400 VS V4-DEEPSEARCH SA-5000
+----------------------------------------------------
+Recovery / parent / coverage   unchanged
+Overall rotation AUC           -0.0087930319 (-0.879 pp, -2.82% relative)
+Overall translation AUC        -0.0078509575 (-0.785 pp, -7.17% relative)
+Primary rotation AUC           -0.0089239285 (-0.892 pp, -2.85% relative)
+Primary translation AUC        -0.0078520080 (-0.785 pp, -6.44% relative)
+Secondary rotation AUC         -0.0014985682 (-0.150 pp, -0.26% relative)
+Secondary translation AUC      +0.0000585159 (+0.006 pp, +0.02% relative)
+
+VERSION STATUS
+--------------
+v1              Complete. Current Paper30 8000px evaluation recorded above.
+v3              Previous frozen dashboard values retained temporarily.
+v4-deepsearch   Complete. Current Paper30 8000px evaluation recorded above;
+                evaluator failures = 0.
+v4              Complete. Full-400 Paper30 evaluation recorded above;
+                evaluator failures = 0. Physical constraints passed, but pose
+                AUC is slightly below the paired SA-5000 control.
+
+SCENEBA TRANSLATION-REPAIR SMOKE5 (DIAGNOSTIC; NOT PAPER30)
+-----------------------------------------------------------
+Scenes / matched poses            5 / 62
+Failures                          0
+Current translation AUC@0.5m      0.056913
+Candidate oracle AUC@0.5m         0.072026  (+0.015113)
+GT-free selector raw AUC@0.5m     0.069461  (+0.012548)
+After 30-iter refinement AUC      0.064187  (+0.007274)
+LOSO threshold-policy AUC         0.056913  (+0.000000)
+Accepted repair precision         57.89% (11 / 19)
+Accepted repair harm rate         42.11% (8 / 19)
+
+Decision                          NO-GO for current anchor/threshold policy.
+                                  Candidate oracle is below the +0.03 gate;
+                                  LOSO has no gain; continuous refinement
+                                  erodes about 42% of the raw selector gain.
+                                  See SCENEBA_REPAIR_AUDIT.md.
+
+SCENEBA GEOMETRY-CANDIDATE V1 SMOKE5 (DIAGNOSTIC; REJECTED)
+-----------------------------------------------------------
+Scenes / matched poses            5 / 62
+Failures                          0
+Current translation AUC@0.5m      0.056913
+Expanded candidate oracle AUC     0.072212  (+0.015299)
+GT-free selector raw AUC          0.064684  (+0.007771)
+After 30-iter refinement AUC      0.059422  (+0.002509)
+LOSO threshold-policy AUC         0.056913  (+0.000000)
+Accepted repair precision         56.00%
+Accepted repair harm rate         44.00%
+Incremental oracle vs prior bank  +0.000186
+
+Decision                          REJECTED. Asset-centre scaling and support
+                                  projection add virtually no oracle headroom
+                                  and worsen selection. Next proposal family:
+                                  DINO correspondence / template-view PnP.
+
+SCENEBA DINO/PNP TRANSLATION AUDIT (SMOKE5, 2026-07-30)
+-------------------------------------------------------
+Implementation bug fixed          FBX authoring units -> Blender metres
+Safe candidates                   382 across 5 scenes
+Current translation AUC@0.5m      0.056913
+Candidate oracle AUC@0.5m         0.066195
+Oracle gain                       +0.009282
+Candidate improvement precision   28.43%
+Predeclared gate                  +0.030000
+Decision                          NO-GO; no Paper30 expansion
+
+The bedroom-only +0.082216 oracle gain did not generalize. Candidate coverage
+is not the bottleneck after unit correction; inexact CAD, symmetry, occlusion,
+and ambiguous local correspondences limit the candidate-set upper bound.
+
+NEXT: DISCRETE YAW/SYMMETRY REPAIR
+----------------------------------
+Current rotation AUC@60deg        0.275821
+Yaw-mode oracle AUC@60deg         0.528733
+Verifier evidence                 silhouette/boundary + DINO + depth + physics
+Smoke5 gates                      rot +0.03; precision >=70%; harm <=15%
+                                  trans >= -0.005; physical macro non-decrease
+
+YAW VERIFIER V1 SMOKE5 RESULT
+-----------------------------
+Current/oracle/fixed rot AUC      0.367390 / 0.539980 / 0.341694
+Fixed precision / harm           28.57% / 71.43%
+Translation delta                +0.000000
+Physical macro delta             -0.019264
+Decision                          VERIFIER NO-GO; yaw hypotheses retained
+Diagnosis                         local-Z used instead of world-Z; missing
+                                  plane/semantic-orientation preservation
+Next                              v1.1 coordinate + hard-constraint rerun,
+                                  unchanged numerical thresholds
+
+YAW VERIFIER V1.1 SMOKE5 RESULT
+-------------------------------
+Current/oracle/fixed/LOSO rot AUC 0.367390 / 0.539980 / 0.367390 / 0.367390
+Fixed precision / harm           0.00% / 100.00% (N=1)
+Translation delta                +0.000000
+Physical macro delta             +0.000727
+Semantic pass rate               100.0% -> 100.0%
+Decision                          selector no-go; constraints now correct
+Next                              constraint-layer oracle + feature
+                                  separability + strict LOSO ranker audit
+
+YAW FEATURE AUDIT V1
+--------------------
+All / physical / structural oracle 0.539980 / 0.490044 / 0.420431
+Structural oracle gain             +0.053041
+Structural recoverable objects     11 / 62
+LOSO ranker gain                   -0.001721
+LOSO precision / harm              60.0% / 40.0% (N=5)
+Existing single-feature selectors  all harmful or below baseline
+Decision                            candidates pass; observation model fails
+Next                                candidate-conditioned dense DINO
+                                    2D-3D reprojection residual audit
+
+DENSE DINO YAW REPROJECTION AUDIT
+---------------------------------
+Bedroom valid candidates           108 / 120
+Single-feature rotation AUC        0.320681
+Precision / harm                   33.33% / 66.67%
+LOSO aggregate gain                +0.000000
+Decision                            NO-GO as yaw observation model
+Next                                quotient 3D asset yaw symmetries and
+                                    remeasure observable structural oracle
+
+SHAPE-SYMMETRY-AWARE YAW AUDIT
+------------------------------
+Thresholds                          0.01 / 0.02 / 0.05
+Observable structural gain          +0.033692 at all thresholds
+Shape-equivalent oracle wins        2 / 3 / 4 of 27
+Decision                             small but real yaw opportunity remains
+Final yaw experiment                 two-permutation image-only VLM contact
+                                     sheet with consensus and abstention
+
+Full 2026-07-30 experiment log:
+  SCENEBA_DAY_LOG_2026-07-30.md
+
+PROVENANCE
+----------
+v1 metrics:
+  a10_reusable_results/paper30/eval_gt_metrics_v1_8000.json
+  a10_reusable_results/paper30/eval_freeze_manifest_v1_8000.json
+
+v4-deepsearch metrics:
+  a10_reusable_results/paper30/eval_gt_metrics_v4_deepsearch_8000.json
+  a10_reusable_results/paper30/eval_freeze_manifest_v4_deepsearch_8000.json
+  a10_reusable_results/paper30/eval_matching_diagnostics_v4_deepsearch_8000.json
+
+v4 metrics:
+  a10_reusable_results/paper30/eval_gt_metrics_v4_8000.json
+  a10_reusable_results/paper30/eval_freeze_manifest_v4_8000.json
+  a10_reusable_results/paper30/eval_matching_diagnostics_v4_8000.json
+
+v3 temporary metrics:
+  Previous EVAL_DASHBOARD.ascii snapshot dated 2026-07-10.
+
+SceneBA repair Smoke5:
+  a10_reusable_results/paper30/sceneba_audit/repair_candidate_oracle_smoke5.json
+  logs/sceneba_repair_candidate_oracle_smoke5.log
+
+UPDATE RULE
+-----------
+Only compare rows generated with the same Paper30 scene manifest, 8000px visible
+mask threshold, matching policy, GT source, and pose-alignment implementation.
+Replace "pending import" only from a frozen evaluator JSON artifact.
+
+PAPER30 PRIMARY QUALITY -- V5-FAST FIX121 (2026-08-12)
+------------------------------------------------------
+Protocol                             Paper30; visible mask >= 8000 px;
+                                     Primary objects; aligned pose metrics
+Version                recovery     parent      rot AUC@60   trans AUC@0.5m  physical macro
+---------------------------------------------------------------------------------------------
+v1                     89.49%       89.32%      48.13%       23.73%           52.98%
+v4-deepsearch          88.22%       80.14%      31.34%       12.19%           54.58%
+V5-fast / Fix61        88.22%       80.14%      31.38%       12.14%           62.10%
+
+Interpretation:
+  - Primary recovery and parent are unchanged from v4-deepsearch to V5-fast.
+  - V5-fast vs v4-deepsearch: rotation +0.035 percentage points and
+    translation -0.055 percentage points; both are effectively preserved.
+  - V5-fast S4 (Fix61): 192.930 s/scene, 1.608 GPU-hours, 3.513x.
+  - V5-medium adds Fix114 166.333 s/scene: final S4 359.263 s/scene,
+    2.994 GPU-hours, 1.887x. Final 256-sample rendering is separate: 415.570 s
+    two-A10 wall time.
+  - Cold S0-S3: 636.949 s/scene, 5.308 GPU-hours; measured two-A10 wall
+    9649.662 s (2.680 h).
+    Stage means: S0=9.687 s (1.52%), S1=443.036 s (69.56%),
+    S2=137.451 s (21.58%), S3=44.790 s (7.03%), overhead=1.986 s (0.31%).
+    Accounting closure error: -0.000000 s. Main full-chain bottleneck: S1.
+  - V5-fast S0-S4: 829.879 s/scene, 6.916 GPU-hours, ideal 3.458 h/2A10.
+  - V5-medium S0-S4: 996.212 s/scene, 8.302 GPU-hours, ideal 4.151 h/2A10.
+  - Physical macro improves by +7.51 percentage points over v4-deepsearch.
+  - The large v1 -> v4-deepsearch pose drop predates SceneProof support repair
+    and therefore is not caused by the V5 support mechanism.
+  - Missing Flux fine-tuning is an upstream hypothesis only.  Do not claim it
+    as the cause without a paired, same-input Flux-on/Flux-off ablation.
+  - Cold Fix124 completed S0-S3 30/30, but the interrupted coordinator did not
+    write a trustworthy combined end-to-end summary. Do not substitute S4 or
+    cached supplement time for cold full-chain wall time.
+
+Frozen artifacts:
+  a10_reusable_results/paper30/sceneba_audit/v5_sceneproof_fast_visual_paper30_fix121/gt_8000.json
+  a10_reusable_results/paper30/sceneba_audit/v5_sceneproof_fast_visual_paper30_fix121/cross_version_quality.json
+
+V4-FAST FROZEN PAPER30 BASELINE (2026-07-31)
+------------------------------------------------
+Canonical artifact                  v4_layoutvlm400_bench
+Paper/version label                 v4-fast / v4_fast
+Scenes / failures                   30 / 0
+Visibility protocol                 mask area >= 8000px, bbox >= 0
+Frozen input                        v4_deepsearch S3
+S4 backend                          unified LayoutVLM factors, Adam400
+Mean runtime                        271.90s/scene
+Speed vs legacy SA5000              2.49x (677.77 / 271.90)
+Physical macro                      0.4877 (+0.05272 vs SA5000)
+Rotation AUC@60                     0.302821 (-0.001706 vs SA5000)
+Translation AUC@0.5m               0.101620 (-0.002211 vs SA5000)
+Matched / overall parent            302/363 / 0.748344
+Primary recovery / parent           0.882166 / 0.801444
+
+V5-SCENELM STATUS
+-----------------
+Latest Paper30 S4-only speed         3.513x (677.77 / ~192.93 s per scene)
+Supersedes intermediate result       3.10x (677.77 / 218.80 s per scene)
+Fix114 repair layer                  166.33 s/scene (4990 useful GPU-seconds)
+Final Fix61 + Fix114 S4              1.887x (677.77 / 359.26 s per scene)
+Final render (outside S4)            415.57 s wall / 30 scenes / two A10s
+Single method thesis                relation-conditioned scene manifold
+                                     + sparse second-order optimization
+Warm start                          same frozen v4_deepsearch S3 as v4-fast
+Implemented                         support/plane minimal coordinates;
+                                     parent rigid inheritance; graph checks;
+                                     per-object blocks; Schur reference;
+                                     matrix-free LM/PCG; residual freeze/wake;
+                                     stationarity/primal certificates
+Default status                      OFF pending A10 Smoke1 and Smoke5
+Do not combine                      depth-center, active router, VLM/PnP,
+                                     MoGe/NOC, or discrete repair branches

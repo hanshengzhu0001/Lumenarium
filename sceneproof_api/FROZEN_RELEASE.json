@@ -1,0 +1,35 @@
+{
+  "release_id": "sceneproof-fast-medium-release143-2026-08-15",
+  "frozen_on": "2026-08-15",
+  "profiles": {
+    "fast": {
+      "incumbent": "Fix61",
+      "final_layer": "none; frozen Fix61 passthrough",
+      "version": "v5_sceneproof_fast_fix61_api",
+      "eligible_for_paper_metrics": true
+    },
+    "medium": {
+      "incumbent": "Fix61",
+      "final_layer": "conservative Fix140 runnerfix1 plus true-support/floor fallback and at most four unresolved-leaf suppressions",
+      "version": "v5_sceneproof_medium_visual_safe_api",
+      "eligible_for_paper_metrics": false,
+      "validated_smoke_job": "98323a903c2a41e282d6f0243a9bfb6d"
+    }
+  },
+  "pipeline": [
+    "S0 geometry",
+    "S1 parsing",
+    "S2 DeepSearch retrieval",
+    "S3 pose",
+    "S4 SceneLM Fix61",
+    "optional presentation-only visual-safe cleanup for medium",
+    "locked source-S3-camera render"
+  ],
+  "cache_policy": "Byte-identical inputs reuse frozen S0-S3/Fix61. Optional reruns create isolated final-stage jobs and artifacts.",
+  "terminal_statuses": [
+    "certified",
+    "visual_salvaged",
+    "unresolved",
+    "pipeline_failed"
+  ]
+}

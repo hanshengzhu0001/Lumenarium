@@ -206,6 +206,23 @@ class Logger:
             stage_name: 阶段名称，如 "S0_geometry", "S1_parsing" 等
         """
         # 如果已有阶段日志，先关闭它
+        # Stable API marker, emitted before stdout is redirected into the
+        # verbose per-stage log.  This lets the coordinator expose real S0-S4
+        # progress without copying model logs into the public job record.
+        if os.environ.get("IMAGINARIUM_API_PROGRESS", "0") == "1":
+            progress = {
+                "S0_geometry": 0.05,
+                "S1_parsing": 0.12,
+                "S2_retrieval": 0.30,
+                "S3_pose": 0.40,
+                "S4_layout": 0.48,
+            }.get(stage_name)
+            if progress is not None:
+                self.original_stdout.write(
+                    f"SCENEPROOF_API_STAGE={stage_name} PROGRESS={progress:.2f}\n"
+                )
+                self.original_stdout.flush()
+
         if self.stage_file_handler:
             self.end_stage()
         
@@ -295,4 +312,3 @@ class Logger:
             self.cleanup()
         except:
             pass  # 忽略析构时的异常
-

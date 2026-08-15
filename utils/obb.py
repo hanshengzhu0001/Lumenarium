@@ -703,6 +703,12 @@ def refine_all_obbs_with_scene_graph(obbs, names, wall_floor_pose, scene_graph):
             refined_obbs_dict[name] = refined_obb
         else:
             # 父物体还未处理，先处理父物体
+            # A structural parent may exist in the scene graph without an OBB
+            # entry. Preserve the measured child OBB fail-closed in that case.
+            if parent not in names:
+                print(f"Warning: Missing parent OBB {parent} for {name}. Using original OBB.")
+                refined_obbs_dict[name] = obb
+                return
             if parent not in processed_objects:
                 parent_index = names.index(parent)
                 process_object(parent, obbs[parent_index])

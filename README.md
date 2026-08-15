@@ -27,6 +27,49 @@ ${}^1$ Tsinghua University &nbsp; ${}^2$ Tencent &nbsp; ${}^3$ Southeast Univers
 
 ## 📢 Latest Announcements
 
+### SceneProof final Paper30 results
+
+The table below is the frozen reporting table for Primary objects with at
+least 8,000 visible pixels. Ground truth is used only for evaluation, never
+for cold-start selection or optimization.
+
+| Version | Primary recovery | Primary parent | Rotation AUC@60 | Translation AUC@0.5 m | Physical macro |
+|---|---:|---:|---:|---:|---:|
+| V1 | 89.49% | **89.32%** | **48.13%** | **23.73%** | 52.98% |
+| V3 cold | **91.40%** | 87.80% | 48.11% | 20.36% | 41.20% fresh evaluator; 52.14% legacy dashboard |
+| V4 DeepSearch | 88.22% | 80.14% | 31.34% | 12.19% | 54.58% |
+| **V5-fast / Fix61** | 88.22% | 80.14% | 31.38% | 12.14% | **62.10%** |
+
+V5-fast preserves the V4 DeepSearch pose operating point while improving
+physical macro by 7.52 percentage points. The large rotation/translation
+change occurs upstream between V3 and V4 DeepSearch, rather than in the
+SceneLM/Fix61 proof layer. V3 physical macro is reported with both values
+because its fresh relation-conditioned evaluation and historical dashboard
+used different evaluator states; they must not be mixed silently.
+
+| Runtime scope | Mean seconds/scene | Paper30 useful GPU-hours | Speedup vs legacy S4 |
+|---|---:|---:|---:|
+| Cold S0--S3 | 636.949 | 5.308 | -- |
+| Legacy SA-5000 S4 | 677.770 | 5.648 | 1.000x |
+| **V5-fast S4 (SceneLM/Fix61)** | **192.930** | **1.608** | **3.513x** |
+| Historical Fix114 repair add-on | 166.333 | 1.386 | additive |
+| Historical Fix61 + Fix114 S4 | 359.263 | 2.994 | 1.887x |
+
+The measured cold-stage means are S0 9.687 s, S1 443.036 s, S2 137.451 s,
+S3 44.790 s, plus 1.986 s orchestration overhead. Thus V5-fast S0--S4 is
+829.879 s/scene (6.916 useful GPU-hours over Paper30). The measured cold
+S0--S3 two-A10 wall time is 2.680 hours. V3 is approximately 23.8 min/scene
+and 11.9 useful GPU-hours over Paper30; this is an estimate reconstructed from
+27 complete runtime rows and is labelled accordingly.
+
+The deployed product exposes two profiles: **Fast** is frozen Fix61 and is
+eligible for paper metrics; **Medium** is Fix61 plus conservative visual-safe
+cleanup. Medium may relocate visibly unsupported objects or suppress a small
+number of unresolved duplicates, so it is presentation-only and is not used
+for quantitative paper metrics. Full provenance and caveats are recorded in
+`SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md` and
+`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`.
+
 > [!IMPORTANT]
 > **Update (2025.12.23):** Fixed some size and scale errors in the scene dataset and 3D asset dataset. Please re-download the updates.
 

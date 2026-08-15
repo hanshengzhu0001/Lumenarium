@@ -10,6 +10,7 @@ import re
 import ast
 import threading
 import os
+from contextlib import contextmanager
 from PIL import Image, ImageOps
 from threading import Semaphore
 
@@ -20,6 +21,29 @@ print_lock = threading.Lock()
 # 注意：这个信号量在多进程环境下不共享，所以每个进程独立限制
 # 如果要跨进程限制，需要用multiprocessing.Semaphore
 _api_semaphore = Semaphore(1)  # 改为1，确保串行调用API
+
+
+@contextmanager
+def _cross_process_api_lock():
+    """Optionally serialize API calls across independent scene processes."""
+    lock_path = os.environ.get("IMAGINARIUM_GPT_LOCK_FILE", "").strip()
+    if not lock_path:
+        yield
+        return
+
+    # Imported lazily because fcntl is available on the Linux inference host,
+    # but not on Windows development machines.
+    import fcntl
+
+    lock_parent = os.path.dirname(lock_path)
+    if lock_parent:
+        os.makedirs(lock_parent, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 # 全局变量，用于在工作进程中存储 agent 实例
 worker_agent = None
@@ -367,7 +391,8 @@ class GPTApi(BaseApi):
             # Gemini stream mode: sync SSE, fastest
             payload = self._build_gemini_payload(prompt, image=image, **kwargs)
             start_time = time.time()
-            full_text = self._gemini_stream(payload)
+            with _cross_process_api_lock():
+                full_text = self._gemini_stream(payload)
             print(f"GEMINI-STREAM Time cost {time.time() - start_time:.1f}s.")
             if only_return_request:
                 return payload
@@ -419,11 +444,12 @@ class GPTApi(BaseApi):
             try:
                 start_time = time.time()
                 # 获取信号量，限制并发API调用
-                _api_semaphore.acquire()
-                try:
-                    full_text = self._submit_and_poll(payload, max_wait=max_wait)
-                finally:
-                    _api_semaphore.release()
+                with _cross_process_api_lock():
+                    _api_semaphore.acquire()
+                    try:
+                        full_text = self._submit_and_poll(payload, max_wait=max_wait)
+                    finally:
+                        _api_semaphore.release()
                 
                 print(f"{self.api_family.upper()} Time cost {time.time() - start_time:.1f}s.")
                 if full_text:

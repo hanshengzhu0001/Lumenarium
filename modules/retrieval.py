@@ -7,9 +7,15 @@ Fully migrated from S2_3d_retrieval_op.py
 import os
 import json
 import re
+import time
 
 from core.context import Context
 from utils.io import load_json, save_json
+
+
+DEEPSEARCH_URL = os.environ.get(
+    "OMNIVERSE_DEEPSEARCH_URL", "https://ov.qq.com/search"
+)
 
 class TextureRetrieval:
     def __init__(self, texture_embeddings_path, processor, model, device, logger=None):
@@ -376,6 +382,115 @@ class RetrievalModule:
         self.logger = context.logger
         self.cfg = context.config.get('S2_3d_retrieval', {})
         self.shared_cfg = context.config.shared
+
+    def _deepsearch_search(self, item_label, mask_b64, limit=10):
+        """Retrieve ranked Omniverse assets for one detected object."""
+        import requests
+
+        body = {"limit": limit}
+        # DeepSearch searches the configured storage index by default. Keep
+        # path scoping optional: the API/proxy has no UE "current folder"
+        # context, while deployments may store the same collection elsewhere.
+        search_path = os.environ.get(
+            "OMNIVERSE_DEEPSEARCH_SEARCH_PATH", ""
+        ).strip()
+        if search_path:
+            body["search_path"] = search_path
+        if mask_b64:
+            body["image_similarity_search"] = [mask_b64]
+        if item_label:
+            body["description"] = item_label
+
+        # The UE transparent proxy normally injects its own Omniverse
+        # credentials. Supplying a token here remains useful when the proxy is
+        # configured to forward client authentication instead.
+        jwt_token = os.environ.get("OMNIVERSE_JWT_TOKEN")
+        auth = ("$omni-api-token", jwt_token) if jwt_token else None
+        deepsearch_url = os.environ.get("OMNIVERSE_DEEPSEARCH_URL", DEEPSEARCH_URL)
+        max_attempts = max(
+            1, int(os.environ.get("OMNIVERSE_DEEPSEARCH_MAX_ATTEMPTS", "6"))
+        )
+        timeout = max(
+            1.0, float(os.environ.get("OMNIVERSE_DEEPSEARCH_TIMEOUT", "60"))
+        )
+        retry_delay = max(
+            0.0, float(os.environ.get("OMNIVERSE_DEEPSEARCH_RETRY_DELAY", "2"))
+        )
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    deepsearch_url,
+                    json=body,
+                    auth=auth,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                results = response.json()
+                break
+            except requests.RequestException as exc:
+                status = (
+                    exc.response.status_code
+                    if getattr(exc, "response", None) is not None
+                    else None
+                )
+                retryable = status is None or status == 429 or status >= 500
+                if not retryable or attempt >= max_attempts:
+                    raise RuntimeError(
+                        "Omniverse DeepSearch request failed. Check the "
+                        "configured endpoint, network access, and Omniverse "
+                        "API token."
+                    ) from exc
+                delay = min(retry_delay * (2 ** (attempt - 1)), 60.0)
+                self.logger.warning(
+                    f"DeepSearch transient failure for {item_label!r} "
+                    f"({exc}); retrying in {delay:.1f}s "
+                    f"({attempt}/{max_attempts})."
+                )
+                time.sleep(delay)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "Omniverse DeepSearch returned a non-JSON response."
+                ) from exc
+
+        if not isinstance(results, list):
+            raise RuntimeError(
+                "Omniverse DeepSearch returned an unexpected response; "
+                f"expected a list, got {type(results).__name__}."
+            )
+        return results
+
+    def _map_omniverse_url_to_asset_name(self, omniverse_url, df):
+        """Map an Omniverse URL's file stem to the asset CSV's ``name_en``."""
+        from urllib.parse import unquote, urlparse
+
+        if not omniverse_url or 'name_en' not in df.columns:
+            return None
+
+        url_path = unquote(urlparse(str(omniverse_url)).path).rstrip('/')
+        filename = url_path.rsplit('/', 1)[-1]
+        file_stem = os.path.splitext(filename)[0]
+        normalized_stem = file_stem.casefold()
+        if not normalized_stem:
+            return None
+
+        asset_names = [
+            str(name) for name in df['name_en'].dropna().tolist()
+            if str(name).strip()
+        ]
+
+        # Prefer an exact match, then the longest substring match to avoid a
+        # short asset name shadowing a more specific one.
+        for asset_name in asset_names:
+            if asset_name.casefold() == normalized_stem:
+                return asset_name
+
+        matches = [
+            asset_name for asset_name in asset_names
+            if asset_name.casefold() in normalized_stem
+            or normalized_stem in asset_name.casefold()
+        ]
+        return max(matches, key=len) if matches else None
         
     def run(self):
         """
@@ -428,21 +543,172 @@ class RetrievalModule:
             self.logger.info("Refining obb dimensions with VLM...")
             refine_dimensions_with_vlm(input_folder, save_folder, self.context.gpt_params)
         
-        # 3. Retrieval (with Original DINOv2 Model - compatible with AENet)
-        self.logger.info("Running retrieval with original DINOv2 model (will be reused in S3)...")
-        processor = self.context.original_dino_processor
-        model = self.context.original_dino_model_for_retrieval
-        
-        s2_inference(
-            input_folder=input_folder,
-            fbx_csv_path=self.shared_cfg.fbx_csv_path,
-            asset_embedding_folder=self.cfg.asset_embedding_folder,
-            assets_render_result_folder=self.shared_cfg.assets_render_result_folder,
-            save_folder=save_folder,
-            processor=processor,
-            embedding_model=model,
-            debug_mode=self.context.debug_mode
-        )
+        # 3. Retrieval
+        if os.environ.get('IMAGINARIUM_USE_DEEPSEARCH', '0') == '1':
+            import base64
+            import concurrent.futures
+            import io
+            import pandas as pd
+            from PIL import Image
+
+            self.logger.info("Running retrieval with Omniverse DeepSearch...")
+            final_results = {}
+            categorys = load_json(os.path.join(input_folder, 'result.json'))['categorys']
+            df = pd.read_csv(self.shared_cfg.fbx_csv_path, skiprows=0)
+            ori_image_path = os.path.join(input_folder, 'ori.png')
+            ori_image = (
+                Image.open(ori_image_path).convert('RGBA')
+                if os.path.exists(ori_image_path)
+                else None
+            )
+            deepsearch_workers = max(
+                1,
+                int(os.environ.get("OMNIVERSE_DEEPSEARCH_WORKERS", "1")),
+            )
+            request_specs = []
+
+            for obj_name in categorys:
+                if re.match(r'^(wall|floor|ceiling|ground)_\d+$', obj_name):
+                    final_results[obj_name] = []
+                    continue
+
+                mask_path = os.path.join(input_folder, 'masks', f'{obj_name}_mask.png')
+                mask_b64 = None
+                if ori_image is not None and os.path.exists(mask_path):
+                    mask = Image.open(mask_path).convert('L')
+                    bbox = mask.getbbox()
+                    if bbox:
+                        # DeepSearch expects an object image, not the binary
+                        # segmentation mask. Crop the original RGB content and
+                        # carry the segmentation as PNG alpha.
+                        masked_crop = ori_image.crop(bbox)
+                        masked_crop.putalpha(mask.crop(bbox))
+                        buffer = io.BytesIO()
+                        masked_crop.save(buffer, format='PNG')
+                        mask_b64 = base64.b64encode(
+                            buffer.getvalue()
+                        ).decode('ascii')
+                else:
+                    self.logger.warning(
+                        f"DeepSearch image or mask not found for {obj_name}: "
+                        f"{ori_image_path}, {mask_path}; "
+                        "using text-only retrieval."
+                    )
+
+                label = re.sub(r'_\d+$', '', obj_name).replace('_', ' ').replace('-', ' ')
+                self.logger.info(
+                    f"DeepSearch request: object={obj_name}, label={label!r}, "
+                    f"image={'yes' if mask_b64 else 'no'}"
+                )
+                request_specs.append((obj_name, label, mask_b64))
+
+            request_started = time.perf_counter()
+            results_by_object = {}
+            if deepsearch_workers == 1:
+                for obj_name, label, mask_b64 in request_specs:
+                    results_by_object[obj_name] = self._deepsearch_search(
+                        label, mask_b64
+                    )
+            else:
+                self.logger.info(
+                    "DeepSearch bounded concurrency enabled: "
+                    f"workers={deepsearch_workers}, requests={len(request_specs)}"
+                )
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=deepsearch_workers,
+                    thread_name_prefix="deepsearch",
+                ) as executor:
+                    future_by_object = {
+                        obj_name: executor.submit(
+                            self._deepsearch_search, label, mask_b64
+                        )
+                        for obj_name, label, mask_b64 in request_specs
+                    }
+                    # Consume in source order so logs and serialized JSON remain
+                    # deterministic regardless of network completion order.
+                    for obj_name, _, _ in request_specs:
+                        results_by_object[obj_name] = future_by_object[
+                            obj_name
+                        ].result()
+
+            request_seconds = time.perf_counter() - request_started
+            request_count = len(request_specs)
+            self.logger.info(
+                "DeepSearch request batch complete: "
+                f"workers={deepsearch_workers}, requests={request_count}, "
+                f"wall_seconds={request_seconds:.3f}, "
+                f"requests_per_second="
+                f"{request_count / max(request_seconds, 1e-9):.3f}"
+            )
+
+            for obj_name, _, _ in request_specs:
+                results = results_by_object[obj_name]
+                self.logger.info(
+                    f"DeepSearch response: object={obj_name}, results={len(results)}"
+                )
+
+                mapped = []
+                seen_names = set()
+                for result in results:
+                    if not isinstance(result, dict):
+                        self.logger.warning(
+                            f"Ignoring malformed DeepSearch result for {obj_name}: {result!r}"
+                        )
+                        continue
+
+                    url = result.get('url')
+                    score = result.get('score')
+                    name = self._map_omniverse_url_to_asset_name(url, df)
+                    self.logger.info(
+                        f"  DeepSearch result: score={score!r}, url={url!r}, "
+                        f"asset={name!r}"
+                    )
+                    if name and name not in seen_names:
+                        # Match the legacy candidate contract: the asset name is
+                        # the first field, consumed by retrieval_dict[obj][0][0].
+                        mapped.append((name, score))
+                        seen_names.add(name)
+
+                final_results[obj_name] = mapped
+                if not mapped:
+                    self.logger.warning(
+                        f"DeepSearch returned no locally mappable asset for {obj_name}."
+                    )
+
+            retrieval_results_path = os.path.join(save_folder, 'retrieval_results.json')
+            retrieval_results_final_path = os.path.join(
+                save_folder, 'retrieval_results_final.json'
+            )
+            save_json(final_results, retrieval_results_path)
+            save_json(final_results, retrieval_results_final_path)
+
+            # The legacy path writes this file after its group-consistency pass.
+            # DeepSearch intentionally skips that pass, so preserve the graph.
+            scene_graph = load_json(os.path.join(input_folder, 'scene_graph_result.json'))
+            save_json(
+                scene_graph,
+                os.path.join(input_folder, 'scene_graph_result_final.json')
+            )
+            self.logger.info(
+                f"DeepSearch retrieval results saved to {retrieval_results_final_path}"
+            )
+        else:
+            # Original DINOv2 path remains available as the fallback and its
+            # loaded backbone is still reused by S3's AE-Net.
+            self.logger.info("Running retrieval with original DINOv2 model (will be reused in S3)...")
+            processor = self.context.original_dino_processor
+            model = self.context.original_dino_model_for_retrieval
+
+            s2_inference(
+                input_folder=input_folder,
+                fbx_csv_path=self.shared_cfg.fbx_csv_path,
+                asset_embedding_folder=self.cfg.asset_embedding_folder,
+                assets_render_result_folder=self.shared_cfg.assets_render_result_folder,
+                save_folder=save_folder,
+                processor=processor,
+                embedding_model=model,
+                debug_mode=self.context.debug_mode
+            )
         
         # 4. Texture Retrieval for Wall/Floor/Ceiling
         
@@ -490,7 +756,6 @@ class RetrievalModule:
         
         # Build mapping from generic categories to specific object instances
         texture_results_mapped = {}
-        import re
         for obj_name in retrieval_res.keys():
             category = None
             if re.match(r'^wall_\d+$', obj_name):

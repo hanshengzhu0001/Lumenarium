@@ -679,7 +679,15 @@ def cal_embedding_sim(
             item_name,
             normalize_detected_item_class(item_name, set(asset_to_class_en_dict.values())),
         )
-        category_to_items[item_class_name].append(item_name)
+        # Category batching repeats every candidate feature tensor once per
+        # detected item.  Large scenes can exceed a 24 GiB GPU even though the
+        # matching result for each item is independent, so allow exact
+        # item-wise evaluation on constrained inference hosts.
+        itemwise_matching = os.getenv(
+            "IMAGINARIUM_S2_ITEMWISE_MATCHING", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        batch_key = (item_class_name, item_name) if itemwise_matching else item_class_name
+        category_to_items[batch_key].append(item_name)
         
     # 4. Process each category as a single batch.
     for category, items_in_batch in category_to_items.items():

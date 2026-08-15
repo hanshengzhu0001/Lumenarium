@@ -35,7 +35,7 @@ def pre_convert(scenes):
     """提前将所有 PNG 转 RGB，避免重复 IO"""
     converted = 0
     for name, png_path, _ in scenes:
-        for v in ["v1", "v3"]:
+        for v in ["v1", "v3", "v4"]:
             tag = f"{name}_{v}"
             demo_path = DEMO_DIR / f"{tag}.png"
             if demo_path.exists(): continue
@@ -107,11 +107,33 @@ def make_run_config(config_template: Path, output_root: Path, run_name: str) -> 
 
 
 def run_one_scene(args):
-    scene_name, png_path, meta_path, variant, gpu_id, output_root, config_path, timeout, gpt_max_wait, gpt_max_retries, clean = args
+    (
+        scene_name,
+        png_path,
+        meta_path,
+        variant,
+        gpu_id,
+        output_root,
+        config_path,
+        timeout,
+        gpt_max_wait,
+        gpt_max_retries,
+        clean,
+        reuse_v1_root,
+    ) = args
     output_root = Path(output_root)
     tag = f"{scene_name}_{variant}"
     demo_path = DEMO_DIR / f"{tag}.png"
     output_dir = output_root / f"{tag}_result"
+
+    if variant == "v4" and reuse_v1_root:
+        v1_output = Path(reuse_v1_root) / f"{scene_name}_v1_result"
+        for stage_name in ("S0_geometry_pred_results", "S1_scene_parsing_results"):
+            source_stage = v1_output / stage_name
+            target_stage = output_dir / stage_name
+            if source_stage.is_dir() and not target_stage.exists():
+                target_stage.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(source_stage, target_stage)
 
     # 已有结果就跳过
     s4_file = output_dir / "S4_layout_refinement"
@@ -131,13 +153,17 @@ def run_one_scene(args):
     if gpt_max_retries:
         env["IMAGINARIUM_GPT_MAX_RETRIES"] = str(gpt_max_retries)
 
-    if variant == "v3":
+    if variant in ("v3", "v4"):
         env["IMAGINARIUM_FLOOR_VERIFY_V2"] = "1"
         env["IMAGINARIUM_S3_STACK_AWARE"] = "1"
         env["IMAGINARIUM_S4_STACK_AWARE"] = "1"
         env["IMAGINARIUM_S1_LOWCAT_PASS"] = "1"  # targeted re-detection for low-recall categories
         env["IMAGINARIUM_USE_SAM3_DETECTION"] = "1"  # SAM3 text-based detection replaces GD
-        script = str(PROJECT_ROOT / "run_imaginarium_I2Layout_v3.py")
+        if variant == "v4":
+            env["IMAGINARIUM_USE_DEEPSEARCH"] = "1"
+            script = str(PROJECT_ROOT / "run_imaginarium_I2Layout_v4_deepsearch.py")
+        else:
+            script = str(PROJECT_ROOT / "run_imaginarium_I2Layout_v3.py")
     else:
         env["IMAGINARIUM_USE_SAM3_DETECTION"] = "1"  # also use SAM3 for v1
         script = str(PROJECT_ROOT / "run_imaginarium_I2Layout.py")
@@ -180,6 +206,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--v1-only", action="store_true")
     parser.add_argument("--v3-only", action="store_true")
+    parser.add_argument("--v4-only", action="store_true")
     parser.add_argument("--run-name", default="", help="Isolated run name, e.g. fixdecode -> saved_results_fixdecode")
     parser.add_argument("--output-root", default="", help="Override output root. Defaults to saved_results or saved_results_<run-name>")
     parser.add_argument("--config-template", default=str(DEFAULT_CONFIG))
@@ -189,6 +216,11 @@ def main():
     parser.add_argument("--gpt-max-retries", type=int, default=0, help="Per GPT call retries; 0 keeps llm_api default")
     parser.add_argument("--scenes", default="", help="Comma-separated scene ids or a text file with one scene id per line")
     parser.add_argument("--no-clean", action="store_true", help="Resume existing outputs instead of deleting each scene result folder")
+    parser.add_argument(
+        "--reuse-v1-root",
+        default="",
+        help="For v4, copy reusable S0/S1 stages from <root>/<scene>_v1_result.",
+    )
     args = parser.parse_args()
 
     scenes = list_scenes()
@@ -231,9 +263,14 @@ def main():
     pre_convert(scenes)
 
     # 构建任务队列
-    variants = []
-    if not args.v3_only: variants.append("v1")
-    if not args.v1_only: variants.append("v3")
+    if args.v4_only:
+        variants = ["v4"]
+    else:
+        variants = []
+        if not args.v3_only:
+            variants.append("v1")
+        if not args.v1_only:
+            variants.append("v3")
 
     tasks = []
     for scene_name, png_path, meta_path in scenes:
@@ -256,6 +293,7 @@ def main():
                 args.gpt_max_wait,
                 args.gpt_max_retries,
                 not args.no_clean,
+                args.reuse_v1_root,
             ))
 
     print(f"待处理: {len(tasks)} 任务, 使用 {gpu_count} GPU 并行")

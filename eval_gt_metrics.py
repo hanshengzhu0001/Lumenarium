@@ -325,7 +325,11 @@ def auc_at(errors: list[float], threshold: float) -> float | None:
     clipped = np.clip(np.asarray(errors, dtype=float), 0.0, threshold)
     xs = np.concatenate([[0.0], np.sort(clipped), [threshold]])
     recalls = np.concatenate([[0.0], np.arange(1, len(clipped) + 1) / len(clipped), [1.0]])
-    area = np.trapezoid(recalls, xs) / threshold
+    # ``numpy.trapezoid`` was introduced after the NumPy 1.26 runtime used by
+    # the A10 environment.  ``trapz`` is mathematically identical here and
+    # keeps evaluation portable without changing any metric definition.
+    trapezoid = getattr(np, "trapezoid", np.trapz)
+    area = trapezoid(recalls, xs) / threshold
     return float(area)
 
 

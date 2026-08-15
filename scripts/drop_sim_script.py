@@ -10,8 +10,12 @@ ACTIVE_DEFAULTS: Dict[str, float | str] = {
     "friction": 100.0,
     "bounciness": 0.0,
     "margin": 0.001,
-    "linear_damping": 0.5,
-    "angular_damping": 0.5,
+    # 0.8 damping replaces 0.5 to reduce bouncing/tumbling in rigid-body
+    # approximation of soft/deformable objects (pillows, cushions) while
+    # still permitting natural rotational settling.  Tested on livingroom
+    # pillows which previously showed contact regression at 0.5.
+    "linear_damping": 0.8,
+    "angular_damping": 0.8,
 }
 
 PASSIVE_DEFAULTS: Dict[str, float | str] = {

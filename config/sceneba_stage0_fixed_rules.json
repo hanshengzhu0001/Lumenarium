@@ -1,0 +1,48 @@
+{
+  "schema_version": "sceneba_stage0_fixed_rules_v1",
+  "frozen_before_answer_key": true,
+  "temperature": 1.0,
+  "normalization": "per-sample median and 1.4826*MAD, clipped to [-5,5]",
+  "pose_marginalization": "log-mean-exp over equal-count pose hypotheses",
+  "missing_factor_policy": "use a factor for a sample only when every asset has at least one finite value",
+  "retrieval_prior": "-log(asset_rank)",
+  "rules": {
+    "retrieval_only": {},
+    "image_only": {
+      "silhouette": 1.0,
+      "boundary": 1.0
+    },
+    "depth_only": {
+      "depth": 1.0
+    },
+    "physical_only": {
+      "collision": 1.0,
+      "support": 1.0
+    },
+    "cached_visual": {
+      "silhouette": 1.0,
+      "boundary": 1.0,
+      "depth": 1.0
+    },
+    "cached_all": {
+      "silhouette": 1.0,
+      "boundary": 1.0,
+      "depth": 1.0,
+      "collision": 1.0,
+      "support": 1.0,
+      "dino": 1.0
+    }
+  },
+  "retrieval_prior_rules": [
+    "retrieval_only",
+    "cached_visual",
+    "cached_all"
+  ],
+  "primary_rule": "cached_all",
+  "go_no_go": {
+    "minimum_correct_of_8": 5,
+    "minimum_mrr": 0.75,
+    "minimum_scene_coverage": 2,
+    "minimum_category_coverage": 2
+  }
+}

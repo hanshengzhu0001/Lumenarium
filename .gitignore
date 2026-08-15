@@ -7,6 +7,9 @@ __pycache__/
 .idea/
 .pytest_cache/
 .specstory/
+.codebuddy/
+.tools/
+_handoff_archive_*/
 
 # ===== Data / models / third-party (large) =====
 asset_data/*
@@ -45,7 +48,22 @@ demo/*.png
 *.gz
 *.pdf
 
+# ===== Local handoff and visual inspection artifacts =====
+lumenarium_*.tar.gz
+fix*.png
+render.png
+visual_safe_*.png
+*_render_simu.png
+eval_reference_images/
+SceneProof_Weekly_Report_*.pptx
+/bedroom_01.png
+paper_draft/*.aux
+paper_draft/*.out
+/src/dinov2/
+/weekly_report_assets/
+
 # ===== Personal configs =====
+.env
 config/config_previous_dataset.yaml
 config/config.yaml
 config/.env

@@ -126,6 +126,19 @@ class LayoutModule:
             "--obj_placement_info_json_path", placement_json_path,
             "--output_folder", S4_folder
         ]
+
+        if os.environ.get("IMAGINARIUM_USE_LAYOUTVLM", "0") == "1":
+            layoutvlm_stage = os.environ.get(
+                "IMAGINARIUM_LAYOUTVLM_STAGE", "reproject"
+            )
+            blender_cmd.extend([
+                "--use_layoutvlm",
+                "--layoutvlm_stage", layoutvlm_stage,
+            ])
+            self.logger.info(
+                "S4 LayoutVLM enabled "
+                f"(stage={layoutvlm_stage}, legacy SA remains available)."
+            )
         
         # 添加debug参数（如果启用）
         if self.context.debug_mode:

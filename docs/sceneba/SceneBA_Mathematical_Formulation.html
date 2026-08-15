@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SceneBA 数学建模与可实现推导</title>
+<style>
+@page { size: A4; margin: 18mm 19mm 18mm 19mm; }
+body { font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color:#172033; line-height:1.55; font-size:10.5pt; max-width:900px; margin:auto; }
+h1 { font-size:24pt; color:#102a43; margin-bottom:4px; }
+h2 { font-size:16pt; color:#163a5f; border-bottom:1px solid #cbd5e1; padding-bottom:3px; margin-top:24px; }
+h3 { font-size:12.5pt; color:#24527a; }
+.subtitle { color:#52667a; margin-bottom:18px; }
+.abstract,.note { background:#f3f7fb; border-left:4px solid #3677a8; padding:10px 13px; }
+.eq { overflow:visible; margin:9px 0; }
+table { border-collapse:collapse; width:100%; }
+th,td { border:1px solid #cbd5e1; padding:5px 7px; vertical-align:top; }
+th { background:#edf3f8; }
+code { font-family:Consolas,monospace; background:#eef2f6; padding:1px 3px; }
+.pagebreak { break-before: page; }
+ol,ul { padding-left:22px; }
+</style>
+<script>
+window.MathJax = {
+  tex: {inlineMath: [['\\(','\\)']], displayMath: [['\\[','\\]']]},
+  chtml: {scale: 0.95},
+  startup: {pageReady: () => MathJax.startup.defaultPageReady().then(() => {
+    document.body.setAttribute('data-mathjax-ready','true');
+  })}
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</head>
+<body>
+<h1>SceneBA：不确定性感知的离散–连续场景束调整</h1>
+<div class="subtitle">数学建模与可实现推导 · v0.2 · 2026-07-30</div>
+<div class="abstract"><b>摘要。</b>SceneBA 将单图三维场景重建从串行的“解析–检索–姿态–布局”流水线，改写为离散场景假设与连续几何参数的联合后验推断。本文明确变量、因子图、对称旋转、连续条件优化、Laplace 边缘证据、受限离散搜索，以及可证伪的 Top-\(K\) oracle 实验。</div>
+
+<h2>1. \(T_i,R_i,S_i\) 是什么？</h2>
+<div class="eq">\[
+z_i=(A_i,G_i,Q_i),\qquad x_i=(T_i,R_i,\ell_i),\qquad \ell_i=\log S_i.
+\]</div>
+<ul>
+<li>\(A_i\)：资产身份，即 local/DeepSearch Top-\(K\) 候选中的三维模型。</li>
+<li>\(G_i=(P_i,\rho_i)\)：场景图状态；\(P_i\) 是 parent/support，\(\rho_i\) 是 <code>on</code>、<code>inside</code>、<code>wall</code>、<code>hang</code> 等关系。</li>
+<li>\(Q_i\)：离散姿态或对称模式。</li>
+<li>\(T_i=(t_x,t_y,t_z)^\top\in\mathbb R^3\)：物体局部原点在世界坐标中的平移，通常以米为单位。</li>
+<li>\(R_i\in\mathrm{SO}(3)\)：从物体局部坐标系到世界坐标系的三维旋转，满足 \(R_i^\top R_i=I,\det R_i=1\)。</li>
+<li>\(S_i=(s_x,s_y,s_z)^\top\in\mathbb R_{>0}^3\)：沿局部三轴的正尺度。优化 \(\ell_i=\log S_i\) 自动保证尺度为正。</li>
+</ul>
+<div class="eq">\[
+M_i(T_i,R_i,S_i)=
+\begin{bmatrix}R_i\operatorname{Diag}(S_i)&T_i\\\mathbf0^\top&1\end{bmatrix},
+\qquad v^{\mathrm w}=R_i\operatorname{Diag}(S_i)v+T_i.
+\]</div>
+可选全局变量包括相机 \(C\)、深度尺度 \(\alpha_d\)、地面 \(\pi_f\) 与墙面 \(\Pi\)，合记为 \(\gamma=(C,\alpha_d,\pi_f,\Pi)\)。
+
+<h2>2. 对称感知旋转</h2>
+设资产 \(A_i\) 的旋转对称群为 \(H_{A_i}\subset\mathrm{SO}(3)\)。物理姿态是商空间中的等价类：
+<div class="eq">\[
+[R_i]=\{R_i h:h\in H_{A_i}\}\in\mathrm{SO}(3)/H_{A_i}.
+\]</div>
+<div class="eq">\[
+d_{\mathrm{sym}}(R_i,\widehat R_i;A_i)=
+\min_{h\in H_{A_i}}\left\|
+\operatorname{Log}(\widehat R_i^\top R_i h)^\vee\right\|_2.
+\]</div>
+连续更新使用李代数参数：
+<div class="eq">\[
+R_i(\delta\omega_i)=R_i^{(0)}\operatorname{Exp}([\delta\omega_i]_\times).
+\]</div>
+
+<h2>3. 后验分布与因子图</h2>
+令 \(y=(I,D,\mathcal M,\Phi)\) 包含图像、深度、实例掩码和缓存特征：
+<div class="eq">\[
+p(z,x,\gamma\mid y)=\frac1{Z(y)}p(z)p(x,\gamma\mid z)
+\prod_{f\in\mathcal F}\psi_f(z_f,x_f,\gamma;y).
+\]</div>
+<div class="eq">\[
+E(z,x,\gamma;y)=-\log p(z)-\log p(x,\gamma\mid z)+
+\sum_{f\in\mathcal F}E_f,\qquad E_f=-\log\psi_f.
+\]</div>
+<div class="eq">\[
+(z^\star,x^\star,\gamma^\star)=\arg\min_{z,x,\gamma}E(z,x,\gamma;y).
+\]</div>
+
+<h2>4. 主要因子</h2>
+<h3>4.1 图像与深度</h3>
+<div class="eq">\[
+E_{\mathrm{sil},i}=1-\operatorname{IoU}(\widehat M_i,M_i),
+\]</div>
+<div class="eq">\[
+E_{\mathrm{feat},i}=\frac1{|\Omega_i|}\sum_{u\in\Omega_i}
+\rho\!\left(1-\cos(\widehat\Phi_i(u),\Phi_I(u))\right),
+\]</div>
+<div class="eq">\[
+E_{\mathrm{depth},i}=\frac1{|\Omega_i|}\sum_{u\in\Omega_i}w_i(u)
+\rho\!\left(\log\widehat D_i(u)-\log(\alpha_dD(u))\right).
+\]</div>
+遮挡因子只在投影重叠区域 \(\Omega_{ij}\) 上计算：
+<div class="eq">\[
+E_{\mathrm{occ},ij}=\frac1{|\Omega_{ij}|}\sum_{u\in\Omega_{ij}}
+\rho\!\left(s_{ij}(u)[\widehat D_i(u)-\widehat D_j(u)]\right).
+\]</div>
+
+<h3>4.2 检索、图结构与初始化</h3>
+<div class="eq">\[
+E_{\mathrm{ret},i}=-\log p_{\mathrm{ret}}(A_i\mid I,M_i,\mathrm{label}_i),
+\quad
+E_{\mathrm{graph},i}=-\log p(P_i,\rho_i\mid\mathrm{S1}),
+\]</div>
+<div class="eq">\[
+E_{\mathrm{init},i}=\frac12(x_i-\mu_i)^\top\Sigma_i^{-1}(x_i-\mu_i).
+\]</div>
+支撑图被限制为有根有向森林：普通物体至多一个结构 parent，且禁止有向环。
+
+<h3>4.3 物理、语义与硬投影</h3>
+<div class="eq">\[
+E_{\mathrm{phys}}=\lambda_cE_{\mathrm{collision}}+
+\lambda_sE_{\mathrm{contact}}+\lambda_pE_{\mathrm{plane}}+
+\lambda_bE_{\mathrm{boundary}}+\lambda_mE_{\mathrm{semantic}}.
+\]</div>
+<div class="eq">\[
+x^{k+1}=\Pi_{\mathcal C(z)}
+\left(x^k-\eta_k\nabla_xE(z,x^k,\gamma^k;y)\right).
+\]</div>
+语义项包含 gated containment、<code>align_with</code>、<code>point_towards</code> 和有向距离；硬 contact、plane、containment 与 boundary 用投影保持可行。
+
+<h3>4.4 总能量</h3>
+<div class="eq">\[
+E=
+\sum_i\left(
+\lambda_{\mathrm{sil}}E_{\mathrm{sil},i}+
+\lambda_{\mathrm{feat}}E_{\mathrm{feat},i}+
+\lambda_dE_{\mathrm{depth},i}+
+\lambda_{\mathrm{ret}}E_{\mathrm{ret},i}+
+\lambda_{\mathrm{init}}E_{\mathrm{init},i}+
+\lambda_gE_{\mathrm{graph},i}\right)
++\sum_{i&lt;j}\lambda_oE_{\mathrm{occ},ij}+E_{\mathrm{phys}}.
+\]</div>
+
+<h2 class="pagebreak">5. Laplace 边缘证据：完整推导</h2>
+固定离散假设 \(z\)，令 \(u=(x,\gamma)\) 且
+<div class="eq">\[
+\widehat u_z=\arg\min_uE(z,u;y),\qquad
+p(z\mid y)=\int p(z,u\mid y)\,du.
+\]</div>
+在局部最优点处二阶展开：
+<div class="eq">\[
+E(z,u;y)\approx E(z,\widehat u_z;y)+
+\frac12(u-\widehat u_z)^\top H_z(u-\widehat u_z),\quad
+H_z=\left.\nabla_u^2E\right|_{\widehat u_z}.
+\]</div>
+高斯积分得到
+<div class="eq">\[
+\begin{aligned}
+p(z\mid y)&\approx\frac1{Z(y)}
+\exp[-E(z,\widehat u_z;y)](2\pi)^{d_z/2}
+\det(H_z+\lambda I)^{-1/2},\\
+\log p(z\mid y)&\approx
+-E(z,\widehat u_z;y)-\frac12\log\det(H_z+\lambda I)
++\frac{d_z}{2}\log(2\pi)+C.
+\end{aligned}
+\]</div>
+为避免离散 prior 被重复计算，实现时令 \(E\) 只包含 likelihood 与 continuous prior，并显式加入 \(\log p(z)\)：
+<div class="eq">\[
+\boxed{\mathcal S(z)=
+-E(z,\widehat u_z;y)
+-\frac12\log\det(H_z+\lambda I)
++\log p(z)+\frac{d_z}{2}\log(2\pi)}
+\]</div>
+\(\mathcal S\) 越大越好。曲率项是 Occam factor：低 loss 但极尖锐、脆弱的假设，边缘概率可能低于具有稍高 minimum loss 但解释区域更宽的假设。
+
+第一版可用 Gauss–Newton/Fisher：
+<div class="eq">\[
+H_z\approx J^\top WJ+\lambda I,
+\]</div>
+再通过稀疏 Cholesky、对角近似或 stochastic Lanczos 估计 \(\log\det H_z\)。不同参数维数的假设必须保留 \(d_z\log(2\pi)/2\) 并采用一致 prior measure。
+
+<h2>6. 受限离散–连续推断</h2>
+<ol>
+<li>以当前 Top-1 流水线结果初始化。</li>
+<li>由 retrieval margin、parent entropy、symmetry ambiguity、视觉及物理残差计算风险。</li>
+<li>选择最高风险物体及 parent/children 构成 active subgraph。</li>
+<li>提出 Top-3 assets、Top-2 parents 和少量 symmetry modes。</li>
+<li>每个提案进行 30–50 步条件连续优化。</li>
+<li>按 Laplace evidence 排名，保留 beam size 4–8。</li>
+<li>冻结低风险子图，直到证据增益或算力预算耗尽。</li>
+<li>获胜状态运行 LayoutVLM400，或使用后续 \(\{30,100,400\}\) router。</li>
+</ol>
+
+<h2>7. 可证伪的实验闭环</h2>
+<ol>
+<li>Asset Recall@1/3/5/10 与 MRR。</li>
+<li>Parent Recall@1/2。</li>
+<li>Symmetry-aware pose oracle。</li>
+<li>Asset-only、parent-only、symmetry-only 与 joint oracle。</li>
+<li>GT-free verifier 能恢复多少 oracle gap。</li>
+</ol>
+建议 go/no-go：Recall@5−Recall@1 至少 10pp，或 joint oracle 达到 rotation AUC +0.05、translation AUC +0.03、parent accuracy +0.05 中任意一项。最终系统应恢复至少 40% oracle gap，展开不超过约 25–30% 物体，且不超过 LayoutVLM400 两倍运行时间。
+
+<h2>8. 当前数学完成度</h2>
+<div class="note">当前数学定义已闭合并足以实现：变量域明确，后验与能量一致，对称性通过商空间处理，连续条件优化和离散边缘比较均有定义，搜索预算有界，并有明确的可证伪实验。但这仍是算法规格而非已经得到实验支持的最终模型；Top-\(K\) 覆盖、evidence 排名能力、因子权重与实际增益必须由实验确定。</div>
+</body>
+</html>

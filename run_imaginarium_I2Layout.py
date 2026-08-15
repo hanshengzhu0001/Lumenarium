@@ -17,7 +17,25 @@ import sys
 import os
 import time
 
+def _load_local_env(path=".env"):
+    """Load simple KEY=VALUE settings without overriding exported variables."""
+    if not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if value[:1] == value[-1:] and value[:1] in ("'", '"'):
+                value = value[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = value
+
 def main():
+    _load_local_env()
     parser = argparse.ArgumentParser(
         description="Imaginarium: Vision-guided 3D Scene Layout Generation",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -368,7 +368,11 @@ def mp_preprocess_template_rgb_and_mask(template_dir, transforms, device, return
 
             # Save processed data to disk (Only masks)
             if not os.path.exists(cache_file_masks):
-                torch.save(cropped_masks, cache_file_masks)
+                # cropped_masks is an alpha-channel view into the 4-channel
+                # cropped RGBA tensor.  Clone it before serialization so
+                # torch.save does not retain and write the full backing
+                # storage (roughly 4x the logical mask size).
+                torch.save(cropped_masks.clone(), cache_file_masks)
                 print(f'processed_masks.pt 保存在{template_dir}', flush=True)
             
         except Exception as e:
@@ -1300,6 +1304,128 @@ def align_inplane_rotation(best_pose_matrix_for_object, rotation_angle):
     
     return pose_matrix_for_blender
 
+
+def build_sceneba_view_hypotheses(
+    *,
+    winner_pose,
+    winner_view_id,
+    pose_data,
+    candidate_view_ids,
+    center_xyz,
+    yaw_offsets,
+    max_views=3,
+):
+    """Build a compact, JSON-serializable view/yaw pose bank for one asset.
+
+    The exact S3 winner is retained first.  Additional view poses use the same
+    OBB-center translation convention as the legacy non-OBB branch.  This
+    helper is enabled only by the standalone SceneBA bank builder and does not
+    change the normal S3 winner.
+    """
+    hypotheses = [
+        {
+            "view_id": int(winner_view_id),
+            "view_rank": 0,
+            "yaw_deg": 0.0,
+            "source": "s3_winner",
+            "pose_matrix_for_blender": np.asarray(winner_pose).tolist(),
+        }
+    ]
+    location = np.asarray(
+        [center_xyz[0], center_xyz[2], -center_xyz[1]], dtype=float
+    )
+    # Count the legacy winner inside ``max_views`` so Top-3 assets × Top-3
+    # views × four yaw modes is bounded by 36 hypotheses per object.
+    unique_views = []
+    for value in [winner_view_id, *candidate_view_ids]:
+        view_id = int(value)
+        if view_id < 0 or view_id in unique_views or view_id >= len(pose_data):
+            continue
+        unique_views.append(view_id)
+        if len(unique_views) >= int(max_views):
+            break
+    seen = {(int(winner_view_id), 0.0)}
+    for view_rank, view_id in enumerate(unique_views):
+        base = convert_camera_pose_of_render_view_to_obj_pose_to_blender_coordinates(
+            pose_data[view_id], location
+        )
+        for yaw in yaw_offsets:
+            key = (view_id, float(yaw))
+            if key in seen:
+                continue
+            seen.add(key)
+            hypotheses.append(
+                {
+                    "view_id": view_id,
+                    "view_rank": view_rank,
+                    "yaw_deg": float(yaw),
+                    "source": "view_yaw_proposal",
+                    "pose_matrix_for_blender": align_inplane_rotation(
+                        base, float(yaw)
+                    ).tolist(),
+                }
+            )
+    return hypotheses
+
+
+def build_sceneba_dense_correspondences(
+    *,
+    view_ids,
+    query_points,
+    template_points,
+    point_scores,
+    rotation_angles,
+    max_views=5,
+):
+    """Serialize the already-computed DINO patch matches for later PnP.
+
+    ``query_points`` and ``template_points`` use the LocalSimilarity
+    convention: (x, y) locations on the 16x16 feature grid.  Only rotation-0
+    query crops are retained in the first PnP audit, so converting a patch
+    back to the original S1 bounding box is unambiguous.
+    """
+    records = []
+    for rotation_index, rotation_deg in enumerate(rotation_angles):
+        if abs(float(rotation_deg)) > 1e-8:
+            continue
+        ids = np.asarray(view_ids[rotation_index]).reshape(-1)
+        queries = np.asarray(query_points[rotation_index])
+        templates = np.asarray(template_points[rotation_index])
+        scores = np.asarray(point_scores[rotation_index])
+        for candidate_index, view_id in enumerate(ids[: int(max_views)]):
+            query = queries[candidate_index]
+            template = templates[candidate_index]
+            score = scores[candidate_index]
+            valid = (
+                (query[:, 0] >= 0)
+                & (query[:, 1] >= 0)
+                & (template[:, 0] >= 0)
+                & (template[:, 1] >= 0)
+                & np.isfinite(score)
+            )
+            if not np.any(valid):
+                continue
+            query = query[valid]
+            template = template[valid]
+            score = score[valid]
+            order = np.argsort(-score)
+            records.append(
+                {
+                    "view_id": int(view_id),
+                    "query_rotation_deg": float(rotation_deg),
+                    "match_count": int(valid.sum()),
+                    "query_points_xy": query[order].astype(float).tolist(),
+                    "template_points_xy": template[order].astype(float).tolist(),
+                    "scores": score[order].astype(float).tolist(),
+                }
+            )
+    return {
+        "schema_version": "sceneba_dense_correspondence_v1",
+        "feature_grid_size": 16,
+        "patch_size": 14,
+        "views": records,
+    }
+
 def detect_truncated_objects(input_folder):
     mask_file = f'{input_folder}/masks.pkl'
     category_json = f'{input_folder}/result.json'
@@ -1373,6 +1499,14 @@ def inference_obj_pose(input_folder, template_dir, depth_image_path, retrieval_d
             print(f'{key}的预测结果已生成,跳过!')
             continue
 
+        if key not in loaded_obb_data:
+            print(
+                f"[Warning] Skipping pose inference for {key}: "
+                "no OBB entry was produced by S2.",
+                flush=True,
+            )
+            continue
+
         if value:
             total_items_info_dict[key] = value[0][0]  # 包含top10个结果,每个结果是[name, view_id_rank[0,1,2], similarity]
         else:
@@ -1400,7 +1534,9 @@ def inference_obj_pose(input_folder, template_dir, depth_image_path, retrieval_d
     transforms = Transforms()
     device = torch.device('cuda')
     
-    max_unique_features_per_batch = 20 # 每个批次最多容纳的不同模版特征数  按经验来看24G显存可设置20, 12G显存则设置为10; A100 80G显存可设置为60
+    max_unique_features_per_batch = int(
+        os.getenv("IMAGINARIUM_S3_MAX_UNIQUE_FEATURES_PER_BATCH", "20")
+    )  # 24G defaults to 20; constrained GPUs can lower this without changing code.
     num_rotations = 2 
     rotation_angle_list = [0, 90]
 
@@ -1633,7 +1769,13 @@ def inference_obj_pose(input_folder, template_dir, depth_image_path, retrieval_d
 
         all_tar_pts = final_predictions.tar_pts[start_idx:end_idx].cpu().numpy()
         all_src_pts = final_predictions.src_pts[start_idx:end_idx].cpu().numpy()
-        all_id_src = final_predictions.id_src[start_idx:end_idx]
+        all_score_pts = final_predictions.score_pts[
+            start_idx:end_idx
+        ].cpu().numpy()
+        # Clone before the legacy reranking below mutates
+        # final_predictions.id_src in place; the dense correspondence tensors
+        # remain in their original candidate order.
+        all_id_src = final_predictions.id_src[start_idx:end_idx].clone()
         all_topk_match_counts = final_predictions.topk_match_counts[start_idx:end_idx]
         
         if use_homography:
@@ -1819,6 +1961,54 @@ def inference_obj_pose(input_folder, template_dir, depth_image_path, retrieval_d
                 'boxes': grounding_result_dict[name],
             }
             print(f'选择了162模板中的其中一个, best_match_vid是{best_match_vid}, inplane_rotation_angle_for_object是{inplane_rotation_angle_for_object}', flush=True)
+
+        if os.environ.get("IMAGINARIUM_SCENEBA_CAPTURE_POSE_BANK", "0") == "1":
+            yaw_offsets = [
+                float(value)
+                for value in os.environ.get(
+                    "IMAGINARIUM_SCENEBA_YAW_OFFSETS", "0,90,180,270"
+                ).split(",")
+                if value.strip()
+            ]
+            candidate_views = []
+            for rotation_index in sorted(rotation_view_ids_map):
+                candidate_views.extend(rotation_view_ids_map[rotation_index])
+            predictions_id_result[name]["sceneba_pose_hypotheses"] = (
+                build_sceneba_view_hypotheses(
+                    winner_pose=pose_matrix_for_blender,
+                    winner_view_id=best_match_vid,
+                    pose_data=pose_data,
+                    candidate_view_ids=candidate_views,
+                    center_xyz=loaded_obb_data[name]["center_xyz"],
+                    yaw_offsets=yaw_offsets,
+                    max_views=int(
+                        os.environ.get("IMAGINARIUM_SCENEBA_TOP_K_VIEWS", "3")
+                    ),
+                )
+            )
+        if (
+            os.environ.get(
+                "IMAGINARIUM_SCENEBA_CAPTURE_DENSE_CORRESPONDENCES", "0"
+            )
+            == "1"
+        ):
+            predictions_id_result[name][
+                "sceneba_dense_correspondences"
+            ] = build_sceneba_dense_correspondences(
+                view_ids=all_id_src.detach().cpu().numpy(),
+                # final_predictions.tar_pts are query-grid locations;
+                # final_predictions.src_pts are their matched template-grid
+                # locations (legacy variable names are reversed).
+                query_points=all_tar_pts,
+                template_points=all_src_pts,
+                point_scores=all_score_pts,
+                rotation_angles=rotation_angle_list,
+                max_views=int(
+                    os.environ.get(
+                        "IMAGINARIUM_SCENEBA_DINO_PNP_TOP_VIEWS", "5"
+                    )
+                ),
+            )
 
         comparison_img_save_path = os.path.join(save_dir, f'{name}_comparison_{best_match_vid:06d}.png')
         bbox = grounding_result_dict[name]

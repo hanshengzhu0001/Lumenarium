@@ -1,0 +1,51 @@
+{
+  "schema_version": "sceneproof_frozen_release_manifest_v1",
+  "date": "2026-08-11",
+  "release": "sceneproof_fix114_frozen",
+  "pipeline": [
+    "S0_geometry",
+    "S1_scene_parsing",
+    "S2_deepsearch_retrieval",
+    "S3_pose_inference",
+    "S4_scenelm_fix61",
+    "sceneproof_fix114_true_mesh_vertical_support",
+    "locked_source_s3_camera_render"
+  ],
+  "source_geometry_version": "v4_deepsearch",
+  "quantitative_anchor": "v5_sceneproof_collision_partial_commit_certified_paper30_fix61",
+  "final_method": "v5_sceneproof_vertical_support_visual_paper30_fix114",
+  "algorithm_policy": {
+    "rotation": "independent_full_so3",
+    "optimization": "guarded_scenelm_with_component_certificate",
+    "support_repair": "transactional_z_only_true_mesh_first_contact",
+    "failure_policy": "fail_closed_restore_incumbent",
+    "camera": "source_s3_scene_camera_locked"
+  },
+  "paper30_reference_result": {
+    "scenes": 30,
+    "failures": 0,
+    "accepted_objects": 23,
+    "affected_scenes": 12,
+    "physical_macro_delta_vs_fix61": 0.000376052,
+    "collision_delta_vs_fix61": 0.004392574913601677,
+    "support_proxy_delta_vs_fix61": -0.004431574479547451,
+    "plane_delta_vs_fix61": 0.0,
+    "semantic_delta_vs_fix61": -1.731572440988316e-09
+  },
+  "benchmark_protocol": {
+    "runner": "scripts/run_sceneproof_frozen_fullchain_paper30_benchmark_fix115.sh",
+    "a10_devices": 2,
+    "deepsearch_workers_per_device": 4,
+    "deepsearch_total_workers": 8,
+    "deepsearch_transport": "explicit_ngrok_search_endpoint_with_fail_fast_preflight",
+    "reported_segments": [
+      "s0_s3_deepsearch",
+      "scenelm_fix61",
+      "sceneproof_fix114",
+      "final_render",
+      "end_to_end"
+    ],
+    "results_are_isolated": true,
+    "historical_cache_is_not_overwritten": true
+  }
+}

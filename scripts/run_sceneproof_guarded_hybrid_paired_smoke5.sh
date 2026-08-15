@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$HOME/Lumenarium"
+manifest="/tmp/sceneproof_guarded_hybrid_paired_smoke5.txt"
+control="v5_sceneproof_smooth_control_smoke5_fix15"
+candidate="v5_sceneproof_guarded_hybrid_smoke5_fix15"
+printf '%s\n' \
+  bedroom_01 livingroom_10 casino_01 official_01 streelitter_01 \
+  > "$manifest"
+
+env \
+  IMAGINARIUM_PAPER30_MANIFEST="$manifest" \
+  IMAGINARIUM_S4_SOURCE_VERSION=v4_deepsearch \
+  IMAGINARIUM_S4_SOURCE_STAGE=S3_pose_inference \
+  IMAGINARIUM_S4_SOURCE_PATTERN='*_placement_info.json' \
+  IMAGINARIUM_S4_TARGET_VERSION="$control" \
+  IMAGINARIUM_S4_ENGINE=layoutvlm \
+  IMAGINARIUM_LAYOUTVLM_STAGE=full \
+  IMAGINARIUM_LAYOUTVLM_SOLVER=v5_scenelm \
+  IMAGINARIUM_LAYOUTVLM_ITERATIONS=2 \
+  IMAGINARIUM_LAYOUTVLM_ACTIVE_SET_ROUTER=0 \
+  IMAGINARIUM_SCENEPROOF_PROGRAM_IR=1 \
+  IMAGINARIUM_SCENEPROOF_REQUIRE_FACTOR_PARITY=1 \
+  IMAGINARIUM_SCENEPROOF_REQUIRE_BINDING_AUDIT=1 \
+  IMAGINARIUM_SCENEPROOF_SHADOW_JACOBIAN_OWNERSHIP=1 \
+  IMAGINARIUM_SCENEPROOF_STABLE_LINEARIZATIONS=2 \
+  IMAGINARIUM_SCENEPROOF_FULL_SO3_GUARDED_SCHUR=0 \
+  IMAGINARIUM_SCENEPROOF_IN_LOOP_GUARDED_SCHUR=0 \
+  IMAGINARIUM_SCENELM_KINEMATIC_BACKSUB=0 \
+  IMAGINARIUM_GPU_FREE_FLOOR_MB="${IMAGINARIUM_GPU_FREE_FLOOR_MB:-16000}" \
+  IMAGINARIUM_S4_SCENE_TIMEOUT=3600 \
+  IMAGINARIUM_S4_WORKER_LOG_ROOT="logs/${control}" \
+  bash scripts/run_paper30_v4_s4_only_dual_gpu.sh
+
+SCENEPROOF_SCHUR_MANIFEST="$manifest" \
+SCENEPROOF_SCHUR_VERSION="$candidate" \
+IMAGINARIUM_SCENEPROOF_IN_LOOP_GUARDED_SCHUR=1 \
+  bash scripts/run_sceneproof_full_so3_guarded_schur_smoke5.sh

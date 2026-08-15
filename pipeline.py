@@ -3,6 +3,7 @@ Imaginarium Pipeline
 主流水线控制器
 """
 
+import os
 import time
 import traceback
 from core.context import Context
@@ -108,12 +109,33 @@ class ImaginariumPipeline:
             self.logger.end_stage()
             print("Asset Retrieval Done", flush=True)
 
+            stop_after_stage = os.environ.get(
+                "IMAGINARIUM_STOP_AFTER_STAGE", ""
+            ).strip().upper()
+            if stop_after_stage == "S2":
+                elapsed = time.time() - start_time
+                self.logger.info(
+                    "Pipeline stopped after S2 by "
+                    "IMAGINARIUM_STOP_AFTER_STAGE=S2 "
+                    f"(elapsed={elapsed:.3f}s)."
+                )
+                return True
+
             # Stage 4: Pose Estimation
             self.logger.info("\n" + "─" * 70)
             self.logger.start_stage("S3_pose")
             self.pose.run()
             self.logger.end_stage()
             print("Pose Estimation Done", flush=True)
+
+            if stop_after_stage == "S3":
+                elapsed = time.time() - start_time
+                self.logger.info(
+                    "Pipeline stopped after S3 by "
+                    "IMAGINARIUM_STOP_AFTER_STAGE=S3 "
+                    f"(elapsed={elapsed:.3f}s)."
+                )
+                return True
 
             # Stage 5: Layout Optimization
             self.logger.info("\n" + "─" * 70)

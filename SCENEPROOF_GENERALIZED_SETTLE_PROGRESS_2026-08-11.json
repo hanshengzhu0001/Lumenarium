@@ -1,0 +1,97 @@
+{
+  "schema_version": "sceneproof_generalized_settle_progress_v1",
+  "date": "2026-08-11",
+  "status": "fix114_paper30_complete_freeze_and_end_support_repair_branch",
+  "frozen_baseline": "v5_sceneproof_collision_partial_commit_certified_paper30_fix61",
+  "supersedes_as_formal_candidate": [
+    "v5_sceneproof_rigid_only_adaptive_paper30_fix84e",
+    "v5_sceneproof_pillow_strict_visual_smoke1_fix106"
+  ],
+  "candidate_discovery": "cached_true_mesh_com_support_witnesses_no_class_allowlist",
+  "candidate_execution": "process_isolated_full_so3_settle",
+  "local_gate": "uniform_exact_mesh_fail_closed",
+  "global_gate": "measured_paper30_component_subset_noninferiority",
+  "render_policy": "retained_scenes_source_s3_locked_camera",
+  "formal_claim": "fix114_inherits_fix61_and_improves_physical_macro_and_collision_with_a_disclosed_legacy_support_proxy_regression",
+  "fix114_final_result": {
+    "baseline": "v5_sceneproof_collision_partial_commit_certified_paper30_fix61",
+    "target": "v5_sceneproof_vertical_support_visual_paper30_fix114",
+    "scenes_completed": 30,
+    "failures": 0,
+    "accepted_objects": 23,
+    "affected_scenes": 12,
+    "physical_macro_delta": 0.000376052,
+    "family_deltas": {
+      "collision": 0.004392574913601677,
+      "support": -0.004431574479547451,
+      "plane": 0.0,
+      "semantic": -1.731572440988316e-09
+    },
+    "paper_role": "main_method_and_final_visual_output",
+    "fix61_role": "quantitative_anchor_and_ablation_without_vertical_support_repair",
+    "decision": "freeze_fix114_and_end_support_repair_branch"
+  },
+  "discovery_v1_result": {
+    "scenes": 30,
+    "eligible": 568,
+    "excluded": 1505,
+    "failures": 0,
+    "decision": "reject_overbroad_manifest"
+  },
+  "discovery_v2_result": {
+    "scenes": 30,
+    "eligible": 262,
+    "excluded": 1811,
+    "failures": 0,
+    "negative_com_witnesses": 243,
+    "finite_gap_witnesses": 19,
+    "decision": "retain_full_denominator_but_probe_asset_representatives_first"
+  },
+  "discovery_v3_result": {
+    "scenes": 30,
+    "eligible": 262,
+    "unique_assets": 130,
+    "representatives": 30,
+    "excluded": 1811,
+    "failures": 0,
+    "decision": "run_local_only_representative_probes"
+  },
+  "fix108_first_run": {
+    "pid": 2335263,
+    "decision": "stop_and_discard",
+    "reason": "probe protocol allowed unaudited horizontal sliding"
+  },
+  "fix108_1_result": {
+    "trials": 30,
+    "strict_passed": 0,
+    "relaxed_passed": 0,
+    "decision": "reject_all_and_fix_rotation_audit",
+    "diagnosis": "quaternion angles were not folded to shortest SO3 branch; uncontrolled upward/excessive motions also observed"
+  },
+  "fix108_2_result": {
+    "trials": 30,
+    "strict_passed": 0,
+    "relaxed_passed": 0,
+    "top_failures": {
+      "obb_collision_penetration": 26,
+      "obb_collision_volume": 26,
+      "support_proxy": 24,
+      "true_mesh_floating": 18,
+      "true_mesh_support": 16
+    },
+    "decision": "do_not_relax_physics_select_proxy_only_nearpass"
+  },
+  "fix109_local_result": {
+    "selected": 3,
+    "relaxed_passed": 3,
+    "strict_passed": 0,
+    "exact_overlap_nonincreasing": 3,
+    "objects": [
+      "official_01/desktop_mouse_pad_3",
+      "official_01/office_chair_5",
+      "workshop_03/mechanical_component_3"
+    ],
+    "decision": "measure_aggregate_and_render_retained_scenes"
+  },
+  "next_step": "compose three proposals, measure Paper30, render official_01 and workshop_03 with locked source-S3 camera"
+}
