@@ -12,7 +12,9 @@ nohup env SCENEPROOF_WORKER_TOKEN="$SCENEPROOF_WORKER_TOKEN" "$HOME/.venvs/lumen
 server_pid=$!
 for _ in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null && break; sleep 1; done
 curl --fail --silent http://127.0.0.1:8080/healthz; echo
-for gpu in 0 1; do
+IFS=',' read -r -a gpu_ids <<< "${SCENEPROOF_API_GPU_IDS:-0,1}"
+for gpu in "${gpu_ids[@]}"; do
+  test -n "$gpu" || continue
   nohup env SCENEPROOF_WORKER_TOKEN="$SCENEPROOF_WORKER_TOKEN" "$HOME/.venvs/lumenarium-py311/bin/python" \
     -m sceneproof_api.worker --api-url http://127.0.0.1:8080 --gpu "$gpu" --worker-id "$(hostname):gpu${gpu}" \
     > "$HOME/Lumenarium/logs/sceneproof_api_gpu${gpu}.log" 2>&1 < /dev/null &

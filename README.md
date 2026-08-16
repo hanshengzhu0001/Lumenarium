@@ -1,354 +1,389 @@
-<div align="center">
+# Lumenarium
 
-# Imaginarium: Vision-guided High-Quality 3D Scene Layout Generation
+**Image-to-3D scene reconstruction with support-aware reasoning, fast language-model optimization, and proof-carrying physical repair.**
 
-[**Xiaoming Zhu***](mailto:zxiaomingthu@163.com) ${}^1$ · [**Xu Huang***](mailto:ydove1031@gmail.com) ${}^2$ · [**Qinghongbing Xie**](mailto:xqhb23@mails.tsinghua.edu.cn) ${}^1$ · [**Zhi Deng**](mailto:zhideng@mail.ustc.edu.cn) ${}^{2\dagger}$ <br> [**Junsheng Yu**](mailto:junshengyu33@163.com) ${}^3$ · [**Yirui Guan**](mailto:guan1r@outlook.com) ${}^2$ · [**Zhongyuan Liu**](mailto:lockliu@tencent.com) ${}^2$ · [**Lin Zhu**](mailto:hahmu6918@shu.edu.cn) ${}^2$ <br> [**Qijun Zhao**](mailto:qijunzhao@tencent.com) ${}^2$ · [**Ligang Liu**](mailto:lgliu@ustc.edu.cn) ${}^4$ · [**Long Zeng**](mailto:zenglong@sz.tsinghua.edu.cn) ${}^{1\dagger}$
+Lumenarium converts a single indoor image into a structured, editable 3D
+scene. The system reconstructs objects and relations in stages S0--S3, then
+uses SceneLM and SceneProof in S4 to optimize the layout and certify guarded
+physical changes.
 
-${}^1$ Tsinghua University &nbsp; ${}^2$ Tencent &nbsp; ${}^3$ Southeast University &nbsp; ${}^4$ University of Science and Technology of China
+**Project contributors:** Hansen Zhu and Calvin Gu
+**Demo video:** [Bilibili: Lumenarium end-to-end demo](https://www.bilibili.com/video/BV1tpbD6hERB/)
 
-*Equal contribution &nbsp; ${}^\dagger$ Corresponding author
+Lumenarium builds on the open-source
+[Imaginarium](https://github.com/HiHiAllen/Imaginarium) system and paper. The
+original work remains cited below; the contributors listed above refer to the
+Lumenarium extensions in this repository.
 
-**SIGGRAPH ASIA 2025 & ACM Transactions on Graphics (TOG)**
+## Demo
 
-<a href="https://arxiv.org/pdf/2510.15564"><img src="https://img.shields.io/badge/Paper-arXiv-b31b1b.svg" alt="Paper"></a>
-<a href="https://ydove0324.github.io/Imaginarium/"><img src="https://img.shields.io/badge/Project-Page-green.svg" alt="Project Page"></a>
-<a href="https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset"><img src="https://img.shields.io/badge/Data-HuggingFace-yellow.svg" alt="Data"></a>
-<a href="./README_zh-CN.md"><img src="https://img.shields.io/badge/中文文档-Chinese_Readme-blue.svg" alt="Chinese Readme"></a>
+| V5-fast: frozen Fix61 | V5-medium: visual-safe cleanup |
+|---|---|
+| ![Lumenarium V5-fast](docs/assets/lumenarium_fast_demo.png) | ![Lumenarium V5-medium](docs/assets/lumenarium_visual_safe_demo.png) |
 
-</div>
+V5-fast is the quantitative system used for paper metrics. V5-medium starts
+from the same Fix61 result and conservatively repairs visible support failures;
+when no safe placement exists, it may suppress at most four unresolved leaf
+duplicates from the final render. Medium is intended for presentation and is
+reported separately from the main quantitative table.
 
----
+## Main results
 
-## 📖 Introduction
+Paper30 evaluation uses **Primary objects with at least 8,000 visible pixels**.
+Ground truth is used only for evaluation, never for candidate selection or
+optimization. Rotation and translation are intentionally omitted from this
+headline table until the DeepSearch pose operating point is recalibrated.
 
-**Imaginarium** is a novel vision-guided 3D layout generation system that addresses the challenges of generating logically coherent and visually appealing customized scene layouts. We employ an image generation model to expand prompt representations into images, fine-tuning it to align with our high-quality asset library. We then develop a robust image parsing module to recover the 3D layout of scenes based on visual semantics and geometric information, optimizing the scene layout using scene graphs to ensure logical coherence.
+| Version | Primary recovery | Primary parent | Physical macro | Positioning |
+|---|---:|---:|---:|---|
+| Imaginarium V1 | 89.49% | **89.32%** | 52.98% | original-system baseline |
+| Lumenarium V3 | **91.40%** | 87.80% | 41.20% fresh evaluator / 52.14% legacy dashboard | support-aware accuracy baseline |
+| V4 DeepSearch | 88.22% | 80.14% | 54.58% | retrieval/pose upstream |
+| **Lumenarium V5-fast / Fix61** | **88.22%** | **80.14%** | **62.10%** | main paper and API profile |
+| Lumenarium V5-medium / Visual-safe | pending Fix144 Paper30 run | pending Fix144 Paper30 run | pending Fix144 Paper30 run | presentation-only profile |
 
-![Pipeline](media/pipeline.png)
+V5-fast keeps the V4 DeepSearch recovery and parent operating point while
+improving physical macro by **7.52 percentage points**. V3 physical macro has
+two historical values because the fresh relation-conditioned evaluator and
+the earlier dashboard used different frozen evaluator states; both are shown
+instead of silently mixing protocols.
 
-## 📢 Latest Announcements
+### Full-chain speed
 
-### SceneProof final Paper30 results
+The cold benchmark contains all stages from image input through the final S4
+placement. Final 256-sample rendering is reported separately.
 
-The table below is the frozen reporting table for Primary objects with at
-least 8,000 visible pixels. Ground truth is used only for evaluation, never
-for cold-start selection or optimization.
+| Stage | Mean seconds/scene | Paper30 useful GPU-hours | Notes |
+|---|---:|---:|---|
+| S0 geometry/depth | 9.687 | 0.081 | camera and geometric initialization |
+| S1 parsing | 443.036 | 3.692 | detection, segmentation, graph and semantics |
+| S2 DeepSearch retrieval | 137.451 | 1.145 | asset retrieval |
+| S3 pose | 44.790 | 0.373 | pose inference and serialization |
+| orchestration overhead | 1.986 | -- | measured closure term |
+| **S0--S3 subtotal** | **636.949** | **5.308** | 2.680 h measured wall time on two A10s |
+| V5-fast S4: SceneLM + Fix61 | 192.930 | 1.608 | **3.513x** faster than legacy S4 |
+| **V5-fast S0--S4 total** | **829.879** | **6.916** | 13.83 min/scene |
+| V5-medium visual-safe increment | pending Fix144 Paper30 run | pending | measured from frozen Fix61 |
+| **V5-medium S0--S4 total** | **pending Fix144 Paper30 run** | **pending** | complete cold-chain accounting |
 
-| Version | Primary recovery | Primary parent | Rotation AUC@60 | Translation AUC@0.5 m | Physical macro |
-|---|---:|---:|---:|---:|---:|
-| V1 | 89.49% | **89.32%** | **48.13%** | **23.73%** | 52.98% |
-| V3 cold | **91.40%** | 87.80% | 48.11% | 20.36% | 41.20% fresh evaluator; 52.14% legacy dashboard |
-| V4 DeepSearch | 88.22% | 80.14% | 31.34% | 12.19% | 54.58% |
-| **V5-fast / Fix61** | 88.22% | 80.14% | 31.38% | 12.14% | **62.10%** |
+For reference, the legacy SA-5000 S4 requires 677.770 s/scene and 5.648
+useful GPU-hours on Paper30. The final 256-sample Paper30 render takes 415.570
+seconds of wall time on two A10s and is not included in S0--S4 compute.
 
-V5-fast preserves the V4 DeepSearch pose operating point while improving
-physical macro by 7.52 percentage points. The large rotation/translation
-change occurs upstream between V3 and V4 DeepSearch, rather than in the
-SceneLM/Fix61 proof layer. V3 physical macro is reported with both values
-because its fresh relation-conditioned evaluation and historical dashboard
-used different evaluator states; they must not be mixed silently.
+S1 is currently the dominant bottleneck. On `bedroom_01`, its 469.991 seconds
+break down into 71.970 s detection, 4.550 s segmentation, 210.720 s initial
+scene-graph generation, 55.320 s floor-parent verification, 117.780 s semantic
+API work, and 9.651 s other local work.
 
-| Runtime scope | Mean seconds/scene | Paper30 useful GPU-hours | Speedup vs legacy S4 |
-|---|---:|---:|---:|
-| Cold S0--S3 | 636.949 | 5.308 | -- |
-| Legacy SA-5000 S4 | 677.770 | 5.648 | 1.000x |
-| **V5-fast S4 (SceneLM/Fix61)** | **192.930** | **1.608** | **3.513x** |
-| Historical Fix114 repair add-on | 166.333 | 1.386 | additive |
-| Historical Fix61 + Fix114 S4 | 359.263 | 2.994 | 1.887x |
+## Two main contributions
 
-The measured cold-stage means are S0 9.687 s, S1 443.036 s, S2 137.451 s,
-S3 44.790 s, plus 1.986 s orchestration overhead. Thus V5-fast S0--S4 is
-829.879 s/scene (6.916 useful GPU-hours over Paper30). The measured cold
-S0--S3 two-A10 wall time is 2.680 hours. V3 is approximately 23.8 min/scene
-and 11.9 useful GPU-hours over Paper30; this is an estimate reconstructed from
-27 complete runtime rows and is labelled accordingly.
+### 1. Support-aware scene reconstruction
 
-The deployed product exposes two profiles: **Fast** is frozen Fix61 and is
-eligible for paper metrics; **Medium** is Fix61 plus conservative visual-safe
-cleanup. Medium may relocate visibly unsupported objects or suppress a small
-number of unresolved duplicates, so it is presentation-only and is not used
-for quantitative paper metrics. Full provenance and caveats are recorded in
-`SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md` and
-`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`.
+The V1-to-V3 development introduces explicit physical and relational structure
+before final layout optimization:
 
-> [!IMPORTANT]
-> **Update (2025.12.23):** Fixed some size and scale errors in the scene dataset and 3D asset dataset. Please re-download the updates.
+- complete support trees rather than independent object placements;
+- distinct floor, wall, ceiling and object-support routing;
+- stack-aware S3/S4 placement and deterministic contact preprocessing;
+- missing-structural-parent fallbacks that preserve the incumbent pose instead
+  of crashing or attaching to an invented wall;
+- support witnesses and parent-chain validation for nested objects.
 
-> [!NOTE]
-> **Todo:** We have cleaned and remade 3D assets with potential copyright risks and updated the scene layout dataset accordingly. Due to these changes, the codebase will be updated after recent tuning. Please stay tuned.
+This improves Primary recovery from 89.49% to 91.40% in the measured V3 cold
+run and makes support failures observable as structured relations rather than
+untracked rendering artefacts.
 
-## 🚀 Updates & Optimizations (Codebase)
+### 2. SceneLM optimization with SceneProof certificates
 
-We have recently optimized and adjusted the codebase compared to the original paper:
+The V4-to-V5 development replaces the expensive SA-5000 layout loop with a
+language-model-guided relational optimizer and a proof-carrying commit layer:
 
-- **Background Texture Support**: Introduced a background texture database with logic for retrieving and assigning textures to ceilings, floors, and walls.
-- **Scene Graph "Groups"**: Introduced the concept of "Groups". Objects with repetitive visual features and similar semantics now share the same asset retrieval results, ensuring consistency (e.g., matching all dining chairs to the same asset).
-- **Enhanced 3D Asset Retrieval**: Implemented a dual-mechanism retrieval system using both Local and Global image feature matching, combined with VLM for object size optimization. This improves robustness against occlusion and complex scenes.
+- Relation Programs compile support, contact, collision, plane and semantic
+  statements into explicit factors;
+- SceneLM proposes scoped changes instead of globally perturbing every object;
+- exact-mesh and sparse-geometry witnesses validate the affected component;
+- local gates reject new collision, support, plane, boundary or semantic
+  regressions;
+- component-level and Paper30-level rollback preserve the Fix61 incumbent;
+- serialized pose/render parity prevents in-process success from diverging
+  from the saved scene.
 
-## 🛠️ Installation
+The result is a **3.513x S4 speedup** over legacy SA-5000 and a physical macro
+increase from 54.58% at V4 DeepSearch to 62.10% at V5-fast.
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/HiHiAllen/Imaginarium.git
-cd Imaginarium
-```
+## Changes relative to Imaginarium
 
-### 2. Create Conda Environment
-```bash
-conda create -n imaginarium python=3.10
-conda activate imaginarium
-```
+| Stage or subsystem | Lumenarium change | Why it matters |
+|---|---|---|
+| S0 | fixed geometry rules and explicit structural initialization | stable camera/room geometry for downstream proof |
+| S1 | SAM3-enabled detection, low-category recovery, Gemini semantic analysis and timing audits | better object coverage and an auditable parsing bottleneck |
+| Scene graph | support trees, structural routing, groups and relation programs | represents why an object may move, not only where it is |
+| S2 | DeepSearch asset retrieval developed with Calvin Gu and the Tencent team | faster retrieval with stronger semantic candidates |
+| S2 robustness | missing floor/wall/ceiling OBB fallback | prevents structural-parent crashes while retaining the original OBB |
+| S3 | stack-aware pose inference, bounded batching and pose serialization | preserves parent-child placement and reproducible cold starts |
+| S4 optimizer | SceneLM relational optimization replaces SA-5000 as the main path | reduces S4 from 677.770 s to 192.930 s/scene |
+| SceneProof | factor IR, certificates, guarded local commits and scoped rollback | prevents an optimization gain from silently causing another regression |
+| Physical reasoning | true-mesh COM, contact, overhang, first-contact and support-component audits | distinguishes genuine instability from OBB proxy disagreement |
+| V5-medium | bounded visual-safe support recovery and duplicate suppression | removes conspicuous unsupported clutter without weakening paper claims |
+| Evaluation | 8000px+ Primary protocol, common physical evaluator and provenance dashboard | keeps quality numbers comparable and traceable |
+| Productization | Fast/Medium API, two-A10 workers, frozen-cache reuse, retries and web UI | turns the research pipeline into a usable technical-art service |
 
-### 3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure Blender Environment
-This project uses Blender 4.3.2 for rendering and processing, though versions 4.0+ are generally supported.
-
-- **Setup**: Extract Blender to `./third_party/blender-4.3.2-linux-x64` and install dependencies:
-> **Note:** A pre-configured Blender package is available on HuggingFace at [🤗 blender-4.3.2-linux-x64.tar.gz](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset).
-> **Important:** Even if you use the pre-configured package, you **must still run** the installation script below to configure system paths correctly.
-```bash
-# Ensure blender is extracted to the correct path
-bash blender_install.sh
-```
-
-
----
-
-## 📦 Data Preparation
-
-The 3D scenes and asset dataset are hosted at [🤗 HiHiAllen/Imaginarium-Dataset](https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset), and the derived dataset is hosted at [🤗 binicey/Imaginarium-3D-Derived-Dataset](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset).
-
-### 1. 3D Scenes and Asset Dataset Downloads
-
-Choose the appropriate package based on your needs:
-
-#### Plan A: Full 3D Scene Layout Dataset (Research)
-For full access to Blend source files, RGB renders, instance segmentation, bounding boxes, depth maps, and meta-info (captions, scene graphs, object poses), download:
-- `imaginarium_3d_scene_layout_dataset_part1.tar.gz`
-- `imaginarium_3d_scene_layout_dataset_part2.tar.gz`
-- `imaginarium_3d_scene_layout_dataset_part3.tar.gz`
-- `imaginarium_3d_scene_layout_dataset_part4.tar.gz`
-
-**Structure (e.g., bedroom_01):**
-```text
-bedroom_01/
-  ├── bedroom_01.png
-  ├── bedroom_01.blend
-  ├── bedroom_01_bbox_overlay.png
-  ├── bedroom_01_depth_vis.png
-  ├── bedroom_01_depth.npy
-  ├── bedroom_01_detect_items.pkl
-  ├── bedroom_01_meta.json
-  └── bedroom_01_segmentation.png
-```
-
-#### Plan B: Flux Fine-tuning Data Only
-If you only need data for fine-tuning Flux (RGB images & meta-info), download:
--  `flux_train_data.tar.gz`
-
-#### Plan C: Running Imaginarium (Inference)
-To run the algorithm using our provided weights, you need the 3D Asset Library and metadata:
-- `imaginarium_assets.tar.gz` (3D Models)
-- `imaginarium_assets_internal_placement_space.tar.gz` (Internal Placement Spaces Info)
-- `imaginarium_asset_info.csv` (Metadata)
-- `background_texture_dataset.tar.gz`（Background Texture Dataset）
-- *(Optional)* `imaginarium_asset_info_with_render_images.xlsx` (Visual Reference)
-
-> **💡 Tip:** `imaginarium_asset_info.csv`, `imaginarium_asset_info.xlsx`, and `imaginarium_asset_info_with_render_images.xlsx` may be updated over time. For simply running the scene generation pipeline, the `asset_data/imaginarium_asset_info.csv` already included in this repo is sufficient.
-
-### 2. Derived Data Preparation
-
-The algorithm requires derived data: pose renders, DINOv2 embeddings, AENet embeddings, and voxels.
-**We strongly recommend downloading our pre-processed data** to save significant time.
-
-**Step 0: Download & Organize Files (Crucial)**
-Before running any scripts, please **download** the available derived data from [🤗 binicey/Imaginarium-3D-Derived-Dataset](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset) and **extract** them into the `asset_data/` directory.
-
-1.  **Download List**:
-    *   **Render Results** (**Recommended**): `imaginarium_assets_render_results_part[1-4].tar.gz`
-    *   **DINOv2 Embeddings** (Optional): `imaginarium_assets_patch_embedding.tar.gz`
-    *   **Voxels** (Optional): `imaginarium_assets_voxels.tar.gz`
-
-2.  **Extract & Organize**:
-    Ensure your `asset_data/` folder looks like this before proceeding:
-    ```text
-    asset_data/
-    ├── imaginarium_assets/                  # From Section 1 (Plan C)
-    ├── background_texture_dataset/                  # From Section 1 (Plan C)
-    ├── imaginarium_assets_internal_placement_space/ # From Section 1 (Plan C)
-    ├── imaginarium_assets_render_results/   # Extracted from Step 0
-    ├── imaginarium_assets_patch_embedding/  # Extracted from Step 0 (Optional)
-    ├── imaginarium_assets_voxels/           # Extracted from Step 0 (Optional)
-    └── imaginarium_asset_info.csv           # From Section 1 (Plan C)
-    ```
-
----
-
-**Data Generation Scripts**
-If you have downloaded and extracted the files above, you can skip the corresponding steps.
-
-**Step 1: Render Multi-view Images (for Pose Estimation)**
-> ⚠️ **SKIP if downloaded**: This step takes 1-2 days. If you have extracted `imaginarium_assets_render_results`, skip this.
-```bash
-python scripts/render_fbx_parallel.py \
-    --input_dir asset_data/imaginarium_assets \
-    --output_dir asset_data/imaginarium_assets_render_results \
-    --num_gpus 8
-```
-
-**Step 2: Extract DINOv2 Patch Embeddings (for Retrieval)**
-> ⚠️ **SKIP if downloaded**: If you have extracted `imaginarium_assets_patch_embedding`, skip this.
-> *Prerequisite: Requires `imaginarium_assets_render_results`.*
-> Time: Minutes
-```bash
-python scripts/save_asset_patch_embedding_dinov2.py \
-    --input_dir asset_data/imaginarium_assets_render_results \
-    --output_dir asset_data/imaginarium_assets_patch_embedding
-```
-
-**Step 3: Extract AENet Embeddings (for Pose Matching)**
-> ⚠️ **Required (Do Not Skip)**: We **do not** provide this data in the download to save bandwidth. Please generate it locally.
-> *Prerequisite: Requires `imaginarium_assets_render_results`.*
-> Time: 2 hours
-```bash
-python scripts/extract_template_embedding.py \
-    --input_dir asset_data/imaginarium_assets_render_results \
-    --ae_net_weights_path weights/ae_net_pretrained_weights.pth \
-    --ori_dino_weights_path weights/dinov2_vitl14.pth
-```
-
-**Step 4: Precompute Voxels (for Layout Optimization)**
-> ⚠️ **SKIP if downloaded**: If you have extracted `imaginarium_assets_voxels`, skip this.
-> *Prerequisite: Requires `imaginarium_assets`.*
-> Time: Minutes
-```bash
-python scripts/precompute_voxels.py \
-    --fbx_dir asset_data/imaginarium_assets \
-    --output_dir asset_data/imaginarium_assets_voxels
-```
-
-**Step 5: Convert FBX to Blend (Optional, for Faster Loading)**
-> ⚠️ **Optional**: Converts `.fbx` assets to native `.blend` files for significantly faster loading in Stage 2.
-> *Prerequisite: Requires `imaginarium_assets`.*
-> Time: ~20 Minutes (depends on disk speed)
-```bash
-blender --background --python scripts/convert_fbx_to_blend.py -- --fbx_dir asset_data/imaginarium_assets --parallel --workers 8
-```
-
-### 3. Model Checkpoints
-Please download the following weights and place them in the `weights/` directory:
-
-From [🤗 HiHiAllen/Imaginarium-Dataset](https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset):
-- `imaginarium_finetuned_flux.pth`
-
-From [🤗 binicey/Imaginarium-3D-Derived-Dataset](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset):
-> *Note: We host these third-party weights (DINOv2, AENet, Depth Anything V2) for convenience. You can also obtain them from their official repositories.*
-- `dinov2_vitl14.pth`
-- `ae_net_pretrained_weights.pth`
-- `depth_anything_v2_metric_hypersim_vitl.pth`
-
-### 4. Final File Structure
-After completing all steps, your project directory should look like this:
+## Pipeline
 
 ```text
-Imaginarium/
-├── asset_data/
-│   ├── imaginarium_assets/                    # 3D Assets (FBX files and transformed blender)
-│   ├── imaginarium_assets_render_results/     # Rendered images & poses
-│   ├── imaginarium_assets_patch_embedding/    # Generated in Step 2
-│   ├── imaginarium_assets_internal_placement_space   
-│   ├── imaginarium_assets_voxels              # Generated in Step 4
-│   └── imaginarium_asset_info.csv             
-├── weights/
-│   ├── imaginarium_finetuned_flux.pth
-│   ├── dinov2_vitl14.pth
-│   ├── ae_net_pretrained_weights.pth
-│   └── depth_anything_v2_metric_hypersim_vitl.pth
-├── third_party/
-│   └── blender-4.3.2-linux-x64
-└── ...
+image
+  -> S0 geometry and depth
+  -> S1 parsing and Relation Program construction
+  -> S2 DeepSearch asset retrieval
+  -> S3 stack-aware pose inference
+  -> S4 SceneLM optimization
+  -> Fix61 SceneProof certificate and rollback
+  -> optional V5-medium visual-safe cleanup
+  -> placement.json + render.png + evaluation.json + result bundle
 ```
 
----
+## Start from a clean machine
 
-## ⚙️ Configuration
+### Minimum and recommended hardware
 
-1. **Create Config File**:
-   ```bash
-   cp config/config-example.yaml config/config.yaml
-   ```
+The operational floor below is enforced by the bootstrap script. Lower-memory
+GPUs have not been validated for the complete cold pipeline.
 
-2. **Set API Keys**: Edit `config/config.yaml`.
-   *   **LLM Configuration**: Enter your API key and endpoint.
-       *   *Note: We used `claude-4-5-sonnet` for recent testing and debugging.*
-   *   **Grounding DINO**: Obtain your API token from [DeepDataSpace](https://deepdataspace.com/request_api) or the [Grounding-DINO API](https://github.com/IDEA-Research/Grounding-DINO-1.5-API) repository.
+| Resource | Minimum for one job | Recommended production host |
+|---|---:|---:|
+| OS | Linux x86_64 | TencentOS 3 / Ubuntu 22.04 or newer |
+| NVIDIA GPU | 1 GPU with at least 22 GB VRAM | 2 x NVIDIA A10 24 GB |
+| CPU | 16 logical cores | 32+ logical cores |
+| System RAM | 64 GB | 128 GB |
+| Free SSD space | 250 GiB | 500 GiB NVMe |
+| Network | access to Hugging Face and both visual APIs | stable low-latency API access |
 
----
+One GPU runs one scene at a time. Two A10s run two independent jobs and are
+the configuration used for the reported Paper30 wall-clock measurements.
 
-## 🚀 Usage
+### External data and models
 
-The pipeline consists of two stages:
+The setup script downloads the following resources. They are intentionally not
+stored in Git:
 
-### Stage 1: Text-to-Image (T2I)
-Generate a scene image using the fine-tuned Flux model.
-> **Note:** Recommended to run on **A100** GPU.
+| Resource | Source | Local destination |
+|---|---|---|
+| FBX asset library and metadata | `HiHiAllen/Imaginarium-Dataset` | `asset_data/imaginarium_assets`, CSV metadata |
+| placement spaces and textures | Imaginarium datasets | `asset_data/` |
+| rendered asset views and embeddings | `binicey/Imaginarium-3D-Derived-Dataset` | `asset_data/imaginarium_assets_render_results`, patch embeddings |
+| precomputed asset voxels | derived dataset | `asset_data/imaginarium_assets_voxels` |
+| DINOv2 ViT-L/14 | derived dataset / Hugging Face | `weights/dinov2_vitl14.pth` |
+| AE pose network | derived dataset | `weights/ae_net_pretrained_weights.pth` |
+| Depth Anything V2 metric model | derived dataset | `weights/depth_anything_v2_metric_hypersim_vitl.pth` |
+| SAM3 | `facebook/sam3` | Hugging Face cache |
+| Blender 4.3.2 | derived dataset | `third_party/blender-4.3.2-linux-x64` |
+
+Some Hugging Face resources may require accepting their license and exporting
+`HF_TOKEN`. Asset and dataset licenses remain those of their respective
+authors.
+
+### Visual API requirements
+
+Two independent services are required:
+
+1. A Gemini-compatible multimodal endpoint for S1 scene-graph, floor-parent
+   verification, grouping and facing analysis. Configure `GPT_API_KEY`,
+   `GPT_ENDPOINT` and `GPT_MODEL`.
+2. A DeepSearch `/search` endpoint for S2 asset retrieval. Configure
+   `OMNIVERSE_DEEPSEARCH_URL`; private Tencent deployments may additionally
+   require `OMNIVERSE_JWT_TOKEN` or the local proxy in
+   `tools/deepsearch_proxy.py`.
+
+SAM3 is the production detector and runs locally. `GROUND_DINO_TOKEN` is only
+needed when deliberately switching back to the optional Grounding-DINO API.
+
+### One-script installation
+
+Clone the repository, then run the bootstrap script. It installs Micromamba
+when necessary, creates Python 3.11, installs CUDA/Python dependencies,
+downloads/extracts datasets, weights and Blender, and verifies all required
+paths.
+
 ```bash
-python run_imaginarium_T2I.py --prompt 'A cozy living room featuring comfortable armchairs, a gallery wall, and a stylish coffee table.' --num 4
+git clone https://git.woa.com/USD/BowerPhys.git "$HOME/Lumenarium"
+cd "$HOME/Lumenarium"
+
+bash scripts/bootstrap_lumenarium.sh all
 ```
 
-### Stage 2: Image-to-3D Layout (I2Layout)
-Recover the 3D layout from the generated image.
-> **Note:** Capable of running fully on **RTX 3090** and above.
-> **Note:** The first run may take a while, please be patient.
-```bash
-# Basic run
-python run_imaginarium_I2Layout.py demo/demo_0.png
-
-# Clean previous results before running
-python run_imaginarium_I2Layout.py demo/demo_0.png --clean
-
-# Debug mode (visualizes and prints detailed intermediate results)
-python run_imaginarium_I2Layout.py demo/demo_0.png --clean --debug
-```
-
----  
-
-## 🎨 Fine-tuning FLUX  
-If you’d like to fine-tune Flux on your own dataset, we provide a training script.  
-
-1. **Prepare your data**: organize it in a HuggingFace Datasets-compatible format (e.g., an image folder or JSONL).  
-2. **Launch training**:
+For a non-AD environment, use a Git URL for which you have access. After the
+download completes, edit the generated private configuration:
 
 ```bash
-cd scripts/flux
-bash train.sh
+cp -n .env.lumenarium.example .env.lumenarium
+chmod 600 .env.lumenarium
+vi .env.lumenarium
 ```
 
----
+At minimum, replace `GPT_API_KEY`, `GPT_ENDPOINT`,
+`OMNIVERSE_DEEPSEARCH_URL`, and `SCENEPROOF_WORKER_TOKEN`. The private
+`.env.lumenarium` file is ignored by Git.
 
-## 🆕 Adding New Assets
+Validate everything without starting the service:
 
-To add new FBX models to the library:
-1. Update `asset_data/imaginarium_asset_info.csv` with the new asset metadata.
-2. Run the **Derived Data Preparation** scripts (Steps 1-5) to generate necessary rendered images, embeddings and voxels.
+```bash
+bash scripts/bootstrap_lumenarium.sh verify
+```
 
----
+Start the API server and one worker per detected production GPU:
 
-## 📜 License
+```bash
+bash scripts/bootstrap_lumenarium.sh start
+```
 
-- **3D Scene Dataset**: **CC BY-NC-SA 4.0**.
-    Copyright © Imaginarium Team.
-- **3D Asset Dataset**: **CC BY-NC-SA 4.0**.
-    This dataset combines assets from three sources: **our internal team**, **open-source communities**, and **UE Fab** (used with explicit authorization). Full credits and sources are detailed in the metadata.
+### Concurrency and expected speed
 
----
+Gemini and DeepSearch concurrency are separate controls:
 
-## 🔗 Citation
+| Setting | Production default | Meaning |
+|---|---:|---|
+| `SCENEPROOF_API_DEEPSEARCH_WORKERS` | 4 | parallel S2 requests inside one GPU job |
+| two active A10 workers | 2 jobs | up to 8 aggregate DeepSearch requests across two simultaneous jobs |
+| `IMAGINARIUM_PARALLEL_GPT_PROCESSES` | 1 | S1 Gemini request processes per function call |
+| `IMAGINARIUM_GPT_LOCK_FILE` | one shared lock | serializes Gemini across workers to avoid rate-limit failures |
 
-If you find our work useful in your research, please consider citing:
+The measured stable configuration is therefore **4 DeepSearch requests per
+scene, up to 8 across two concurrent scenes, and effective Gemini concurrency
+1**. Removing the shared lock and setting Gemini concurrency to 4 or 8 is
+supported as an experiment only when the endpoint quota allows it:
+
+```bash
+export IMAGINARIUM_PARALLEL_GPT_PROCESSES=8
+unset IMAGINARIUM_GPT_LOCK_FILE
+```
+
+This higher Gemini setting has not been used for the reported Paper30 speed.
+Because 383.82 s of the measured `bedroom_01` S1 time lies in graph,
+floor-verification and semantic phases containing API work, higher quota can
+reduce latency substantially, but an exact 8-way speedup is not expected due
+to local preprocessing, request imbalance and retries. Keep concurrency 1 for
+the reproducible numbers in this README.
+
+**Expected acceleration (not yet a measured benchmark).** If the Gemini
+endpoint sustains eight concurrent requests without the global lock, the
+current profiling suggests an S1 target of roughly **250--320 s/scene**, down
+from the measured Paper30 mean of 443.036 s. Holding the other stages fixed,
+this would put the V5-fast cold S0--S4 path at approximately **637--707
+s/scene** instead of 829.879 s: a saving of about **123--193 seconds** or a
+projected **1.17--1.30x end-to-end speedup**. This range is a capacity-planning
+estimate, not a reported result; it must be replaced by a fresh Paper30 run
+before publication. Request batching and caching remain additional,
+unquantified opportunities.
+
+With the measured production-safe settings, expected cold latency is about
+636.949 s for S0--S3 and 829.879 s through V5-fast S4 per scene. Cached images
+skip frozen S0--S3/Fix61 and normally require only the selected final policy
+and render.
+
+## Use the hosted service
+
+Open [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/),
+upload a 1024x1024 PNG/JPEG, and choose a profile:
+
+- **V5-fast:** frozen Fix61, quantitative and paper-eligible;
+- **V5-medium:** Fix61 plus visual-safe cleanup, presentation-oriented.
+
+New images run the complete S0--S4 pipeline. Byte-identical images reuse the
+frozen S0--S3/Fix61 cache; switching profiles resumes from that shared cache
+and runs only the requested final policy. The UI reports S0, S1, S2, S3 and
+S4 progress separately and packages:
+
+```text
+placement.json     structured object poses and relations
+render.png         source-camera final render
+evaluation.json    certificate, repaired and unresolved objects
+result.json        profile, release and timing summary
+sceneproof-result.zip
+```
+
+## Deploy on the two-A10 host
+
+```bash
+cd "$HOME/Lumenarium"
+bash scripts/bootstrap_lumenarium.sh start
+curl -s http://127.0.0.1:8080/healthz
+```
+
+Monitor the server and both workers:
+
+```bash
+tail -F \
+  "$HOME/Lumenarium/logs/sceneproof_api_server.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu0.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu1.log"
+```
+
+## Run locally from the command line
+
+```bash
+python run_imaginarium_I2Layout_v4_deepsearch.py demo/demo_0.png --clean
+```
+
+For the frozen production profiles, use the API worker entry point so cache,
+certificate and packaging behavior match the hosted service. Deployment and
+artifact details are in
+[`SCENEPROOF_API_V5_FAST_MEDIUM_DEPLOY.md`](SCENEPROOF_API_V5_FAST_MEDIUM_DEPLOY.md).
+
+## Reproduce the Paper30 metrics
+
+The pose evaluator first removes every GT object whose visible instance mask
+has fewer than 8,000 pixels. It then partitions the surviving objects into
+Primary and Secondary subsets and computes recovery, parent accuracy,
+rotation AUC@60 and translation AUC@0.5 m. Consequently, every rotation and
+translation number produced by the commands below is explicitly the
+**8,000px+ Primary** result; all-object pose metrics are diagnostic only and
+are not used in the README headline.
+
+The V5-fast quality, runtime and provenance reports are stored in:
+
+- [`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`](V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md)
+- [`SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md`](SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md)
+- [`EVAL_DASHBOARD.ascii`](EVAL_DASHBOARD.ascii)
+
+Run the Visual-safe Paper30 evaluation from the frozen Fix61 cache:
+
+```bash
+nohup bash scripts/run_sceneproof_visual_safe_paper30_eval_fix144.sh \
+  > "$HOME/Lumenarium/logs/sceneproof_visual_safe_paper30_eval_fix144.log" \
+  2>&1 < /dev/null &
+```
+
+Monitor it immediately with:
+
+```bash
+tail -F \
+  "$HOME/Lumenarium/logs/sceneproof_visual_safe_paper30_eval_fix144.log" \
+  "$HOME/Lumenarium/logs/v5_sceneproof_visual_safe_paper30_fix144/gpu0.log" \
+  "$HOME/Lumenarium/logs/v5_sceneproof_visual_safe_paper30_fix144/gpu1.log"
+```
+
+The final report is written to:
+
+```text
+a10_reusable_results/paper30/sceneba_audit/
+  v5_sceneproof_visual_safe_paper30_fix144/final_eval.json
+```
+
+## Scope and limitations
+
+- V5-fast is the frozen quantitative baseline.
+- V5-medium is a presentation policy and may hide a bounded number of
+  unresolved leaf duplicates; its metrics must remain visibly labelled.
+- Structural or attachment relations without sufficient witnesses are marked
+  unresolved instead of being silently accepted.
+- DeepSearch improves retrieval speed, but the current upstream pose operating
+  point reduces rotation/translation accuracy relative to V3; those metrics
+  are omitted from the headline until recalibration.
+- S1 graph/API latency remains the largest full-chain performance target.
+
+## Foundation and citation
+
+Lumenarium is built on Imaginarium:
 
 ```bibtex
 @article{zhu2025imaginarium,
@@ -359,13 +394,6 @@ If you find our work useful in your research, please consider citing:
 }
 ```
 
----
-
-## 🙏 Acknowledgements
-
-We thank the authors of [GigaPose](https://github.com/nv-nguyen/gigapose), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2), and [Grounding DINO 1.5](https://github.com/IDEA-Research/Grounding-DINO-1.5-API).
-
-**Special Thanks to 3D Artists**
-Our deepest gratitude goes to the related 3D artists from the open-source community and UE Fab. Your creative contributions are the foundation of this project.
-
-**Finally, a heartfelt thank you to everyone who contributed to Imaginarium!**
+Please retain the upstream attribution and licenses for inherited code,
+datasets and assets. Lumenarium-specific contributions are maintained by
+Hansen Zhu and Calvin Gu.

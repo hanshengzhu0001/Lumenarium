@@ -64,6 +64,7 @@ paper_draft/*.out
 
 # ===== Personal configs =====
 .env
+.env.lumenarium
 config/config_previous_dataset.yaml
 config/config.yaml
 config/.env
