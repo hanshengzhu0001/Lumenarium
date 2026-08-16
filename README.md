@@ -17,9 +17,9 @@ Lumenarium extensions in this repository.
 
 ## Demo
 
-| V5-fast: frozen Fix61 | V5-medium: visual-safe cleanup |
-|---|---|
-| ![Lumenarium V5-fast](docs/assets/lumenarium_fast_demo.png) | ![Lumenarium V5-medium](docs/assets/lumenarium_visual_safe_demo.png) |
+The README gallery uses renders exported from the frozen two-A10 service.
+See the end-to-end [Bilibili demo](https://www.bilibili.com/video/BV1tpbD6hERB/)
+while the curated A10 render set is being refreshed.
 
 V5-fast is the quantitative system used for paper metrics. V5-medium starts
 from the same Fix61 result and conservatively repairs visible support failures;
@@ -40,7 +40,6 @@ headline table until the DeepSearch pose operating point is recalibrated.
 | Lumenarium V3 | **91.40%** | 87.80% | 41.20% fresh evaluator / 52.14% legacy dashboard | support-aware accuracy baseline |
 | V4 DeepSearch | 88.22% | 80.14% | 54.58% | retrieval/pose upstream |
 | **Lumenarium V5-fast / Fix61** | **88.22%** | **80.14%** | **62.10%** | main paper and API profile |
-| Lumenarium V5-medium / Visual-safe | pending Fix144 Paper30 run | pending Fix144 Paper30 run | pending Fix144 Paper30 run | presentation-only profile |
 
 V5-fast keeps the V4 DeepSearch recovery and parent operating point while
 improving physical macro by **7.52 percentage points**. V3 physical macro has
@@ -63,8 +62,6 @@ placement. Final 256-sample rendering is reported separately.
 | **S0--S3 subtotal** | **636.949** | **5.308** | 2.680 h measured wall time on two A10s |
 | V5-fast S4: SceneLM + Fix61 | 192.930 | 1.608 | **3.513x** faster than legacy S4 |
 | **V5-fast S0--S4 total** | **829.879** | **6.916** | 13.83 min/scene |
-| V5-medium visual-safe increment | pending Fix144 Paper30 run | pending | measured from frozen Fix61 |
-| **V5-medium S0--S4 total** | **pending Fix144 Paper30 run** | **pending** | complete cold-chain accounting |
 
 For reference, the legacy SA-5000 S4 requires 677.770 s/scene and 5.648
 useful GPU-hours on Paper30. The final 256-sample Paper30 render takes 415.570
