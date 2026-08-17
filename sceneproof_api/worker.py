@@ -21,6 +21,10 @@ STAGE_PATTERN = re.compile(
 )
 
 
+def requires_cold_rerun(job: dict) -> bool:
+    return ":rerun:cold:" in (job.get("idempotency_key") or "")
+
+
 class Worker:
     def __init__(self, *, api_url: str, token: str, gpu: int, worker_id: str,
                  project_root: Path, poll_seconds: float = 5.0):
@@ -108,10 +112,14 @@ class Worker:
                     str(self.gpu),
                     job.get("profile", "medium"),
                 ]
+                process_env = os.environ.copy()
+                if requires_cold_rerun(job):
+                    process_env["SCENEPROOF_API_FORCE_COLD_RERUN"] = "1"
                 with log_path.open("wb") as log:
                     process = subprocess.Popen(
                         command,
                         cwd=self.project_root,
+                        env=process_env,
                         stdout=log,
                         stderr=subprocess.STDOUT,
                         start_new_session=True,

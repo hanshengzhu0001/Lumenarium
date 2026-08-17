@@ -31,6 +31,8 @@ deepsearch_url="${OMNIVERSE_DEEPSEARCH_URL:-${SCENEPROOF_DEEPSEARCH_URL:-https:/
 cache_revision="${SCENEPROOF_API_FIX61_CACHE_REVISION:-fix61-v1}"
 cache_base="${SCENEPROOF_API_CACHE_ROOT:-$HOME/Lumenarium/api_cache}/$cache_revision/$input_digest"
 cache_lock="$cache_base.lock"
+force_cold_rerun="${SCENEPROOF_API_FORCE_COLD_RERUN:-0}"
+case "$force_cold_rerun" in 0|1) ;; *) echo "invalid SCENEPROOF_API_FORCE_COLD_RERUN" >&2; exit 2;; esac
 mkdir -p "$root" "$log_root" "$artifact_dir"
 mkdir -p "$(dirname "$cache_base")"
 printf '%s\n' "$scene_id" > "$manifest"
@@ -41,7 +43,10 @@ s03_start="$(now_ns)"
 fix61_start="$s03_start"
 exec 9>"$cache_lock"
 flock 9
-if test -s "$cache_base/READY"; then
+if test "$force_cold_rerun" = "1"; then
+  echo "SCENEPROOF_API_STAGE=force_cold_rerun PROGRESS=0.02"
+fi
+if test "$force_cold_rerun" != "1" && test -s "$cache_base/READY"; then
   echo "SCENEPROOF_API_STAGE=frozen_fix61_cache_hit PROGRESS=0.70"
   cached_scene_id="$(head -1 "$cache_base/SCENE_ID" 2>/dev/null || true)"
   if [[ "$cached_scene_id" =~ ^[A-Za-z0-9_.-]+$ ]]; then
@@ -166,12 +171,16 @@ PY
     exit 4
   fi
   fix61_end="$(now_ns)"
-  cache_tmp="$(mktemp -d "$(dirname "$cache_base")/.${input_digest}.XXXXXX")"
-  mkdir -p "$cache_tmp/results"
-  cp -a "$root/." "$cache_tmp/results/"
-  printf '%s\n' "$scene_id" > "$cache_tmp/SCENE_ID"
-  printf '%s\n' "$cache_revision" > "$cache_tmp/READY"
-  mv "$cache_tmp" "$cache_base"
+  if test "$force_cold_rerun" != "1"; then
+    cache_tmp="$(mktemp -d "$(dirname "$cache_base")/.${input_digest}.XXXXXX")"
+    mkdir -p "$cache_tmp/results"
+    cp -a "$root/." "$cache_tmp/results/"
+    printf '%s\n' "$scene_id" > "$cache_tmp/SCENE_ID"
+    printf '%s\n' "$cache_revision" > "$cache_tmp/READY"
+    mv "$cache_tmp" "$cache_base"
+  else
+    echo "SCENEPROOF_API_COLD_RERUN_CACHE_WRITE=skipped"
+  fi
 fi
 flock -u 9
 

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from sceneproof_api.store import JobStore
-from sceneproof_api.worker import STAGE_PATTERN
+from sceneproof_api.worker import STAGE_PATTERN, requires_cold_rerun
 
 
 class SceneProofJobStoreTest(unittest.TestCase):
@@ -71,6 +71,15 @@ class SceneProofJobStoreTest(unittest.TestCase):
         )
         self.assertEqual("sceneproof_fix114", match.group(1))
         self.assertEqual(0.75, float(match.group(2)))
+
+    def test_worker_distinguishes_profile_and_cold_reruns(self):
+        self.assertFalse(requires_cold_rerun({
+            "idempotency_key": "sha256:x:rerun:profile:abc",
+        }))
+        self.assertTrue(requires_cold_rerun({
+            "idempotency_key": "sha256:x:rerun:cold:abc",
+        }))
+        self.assertFalse(requires_cold_rerun({"idempotency_key": None}))
 
 
 if __name__ == "__main__":

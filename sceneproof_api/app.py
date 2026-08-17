@@ -91,7 +91,7 @@ def current_release() -> dict:
         },
         "input": {"formats": ["image/png", "image/jpeg"], "size": [1024, 1024]},
         "camera_policy": "source_s3_scene_camera_locked",
-        "execution": "full_s0_s4_for_new_inputs; frozen_fix61_cache_for_identical_inputs",
+        "execution": "full_s0_s4_for_new_inputs; frozen_fix61_cache_for_identical_inputs; explicit_force_cold_rerun_supported",
         "failure_policy": "bounded_retry_then_explicit_pipeline_failed",
     }
 
@@ -101,6 +101,7 @@ async def create_job(
     image: UploadFile = File(...),
     profile: str = Form(default="medium"),
     force_rerun: bool = Form(default=False),
+    force_cold_rerun: bool = Form(default=False),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict:
     if image.content_type not in {"image/png", "image/jpeg"}:
@@ -121,12 +122,17 @@ async def create_job(
     if profile not in {"fast", "medium"}:
         raise HTTPException(status_code=422, detail="profile must be fast or medium")
     digest = hashlib.sha256(payload).hexdigest()
-    rerun_id = uuid.uuid4().hex if force_rerun else None
-    key = idempotency_key or (
-        f"sha256:{digest}:release:{RELEASE_ID}:profile:{profile}:rerun:{rerun_id}"
-        if rerun_id else
-        f"sha256:{digest}:release:{RELEASE_ID}:profile:{profile}"
-    )
+    rerun_id = uuid.uuid4().hex if (force_rerun or force_cold_rerun) else None
+    rerun_kind = "cold" if force_cold_rerun else "profile"
+    if rerun_id:
+        key_prefix = idempotency_key or (
+            f"sha256:{digest}:release:{RELEASE_ID}:profile:{profile}"
+        )
+        key = f"{key_prefix}:rerun:{rerun_kind}:{rerun_id}"
+    else:
+        key = idempotency_key or (
+            f"sha256:{digest}:release:{RELEASE_ID}:profile:{profile}"
+        )
     provisional = STATE_ROOT / "pending" / f"{digest}.image"
     provisional.parent.mkdir(parents=True, exist_ok=True)
     provisional.write_bytes(payload)

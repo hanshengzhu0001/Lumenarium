@@ -22,7 +22,8 @@
       <option value="medium" selected>V5-medium — Fix61 + visual-safe cleanup</option>
     </select><br>
     <small>Identical images reuse the same frozen S0-S3 and Fix61 cache across profiles.</small><br>
-    <label><input name="force_rerun" type="checkbox" value="true"> Re-run this profile while keeping the frozen upstream cache</label><br>
+    <label><input name="force_rerun" type="checkbox" value="true"> Re-run only the selected final profile (reuse frozen S0-S3/Fix61)</label><br>
+    <label><input name="force_cold_rerun" id="force-cold-rerun" type="checkbox" value="true"> Force a new cold S0-S4 run (ignore frozen cache; slower)</label><br>
     <button>Generate scene</button>
   </form>
   <progress id="progress" max="100" value="0"></progress>
@@ -32,9 +33,10 @@
     const form=document.querySelector('#form'),status=document.querySelector('#status'),output=document.querySelector('#output'),bar=document.querySelector('#progress'),stageBox=document.querySelector('#stages');
     const stageDefs=[['s0','S0 Geometry'],['s1','S1 Parsing'],['s2','S2 Retrieval'],['s3','S3 Pose'],['s4','S4 Layout + Proof']];
     stageBox.innerHTML=stageDefs.map(([id,label])=>`<div class="stage" id="stage-${id}">${label}</div>`).join('');
-    function stageGroup(name){if(name.startsWith('S0_')||name.startsWith('s0_'))return's0';if(name.startsWith('S1_')||name.startsWith('s1_'))return's1';if(name.startsWith('S2_')||name.startsWith('s2_'))return's2';if(name.startsWith('S3_')||name.startsWith('s3_'))return's3';if(name.startsWith('s4_')||name==='render'||name==='packaging')return's4';return null}
+    function stageGroup(name){if(name==='force_cold_rerun'||name.startsWith('S0_')||name.startsWith('s0_'))return's0';if(name.startsWith('S1_')||name.startsWith('s1_'))return's1';if(name.startsWith('S2_')||name.startsWith('s2_'))return's2';if(name.startsWith('S3_')||name.startsWith('s3_'))return's3';if(name.startsWith('s4_')||name==='render'||name==='packaging')return's4';return null}
     function paintStages(name,progress){const active=stageGroup(name),order=stageDefs.map(x=>x[0]),index=order.indexOf(active);stageDefs.forEach(([id])=>{const node=document.querySelector('#stage-'+id);node.className='stage'+(index>=0&&order.indexOf(id)<index?' done':id===active?' active':'')});if(name==='frozen_fix61_cache_hit'){['s0','s1','s2','s3'].forEach(id=>document.querySelector('#stage-'+id).className='stage done')}bar.value=Math.round(100*progress)}
     form.onsubmit=async event=>{event.preventDefault();output.innerHTML='';status.className='';
+      if(document.querySelector('#force-cold-rerun').checked&&!confirm('Run a completely new S0-S4 cold start? This ignores the frozen cache and can take 10-15 minutes per scene.'))return;
       const response=await fetch('/v1/jobs',{method:'POST',body:new FormData(form)}),body=await response.json();
       if(!response.ok){status.className='bad';status.textContent=JSON.stringify(body);return}
       const id=body.job.job_id;bar.value=0;paintStages('queued',0);status.textContent='Queued '+id;
