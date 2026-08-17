@@ -126,6 +126,19 @@ cd Lumenarium
 bash scripts/bootstrap_lumenarium.sh all
 ```
 
+腾讯工蜂使用 HTTPS + 业务 AD 认证。首次 `clone`/`pull` 时，在 Git 提示中输入业务
+AD 英文账号和 AD 密码（或工蜂访问令牌）；不要把凭据写入仓库或发给其他人。已有目录
+更新到最新 `master`：
+
+```bash
+cd "$HOME/Lumenarium"
+git status --short
+git remote set-url origin https://git.woa.com/USD/BowerPhys.git
+git pull --ff-only origin master
+```
+
+`git status --short` 必须为空；若有输出，先保留并处理本地实验改动，不要直接覆盖。
+
 安装脚本会准备 Micromamba/Python 3.11、依赖、Blender 4.3.2、模型权重、资产库与
 派生 embedding/voxel。随后编辑私有配置：
 
@@ -138,8 +151,20 @@ bash scripts/bootstrap_lumenarium.sh start
 curl -s http://127.0.0.1:8080/healthz
 ```
 
-必须配置 `GPT_API_KEY`、`GPT_ENDPOINT`、`GPT_MODEL`、
-`OMNIVERSE_DEEPSEARCH_URL` 和随机生成的 `SCENEPROOF_WORKER_TOKEN`。
+必须配置：
+
+| 配置项 | 用途 | 要求 |
+|---|---|---|
+| `GPT_API_KEY` | S1 场景图与语义分析 | Gemini-compatible 视觉 API key |
+| `GPT_ENDPOINT` | S1 API 地址 | 完整 HTTP(S) endpoint |
+| `GPT_MODEL` | S1 模型 | 部署端实际开放的模型名 |
+| `OMNIVERSE_DEEPSEARCH_URL` | S2 资产检索 | 以 `/search` 结尾的 DeepSearch 地址 |
+| `OMNIVERSE_JWT_TOKEN` | 私有 DeepSearch 鉴权 | endpoint 要求 JWT 时填写，否则留空 |
+| `SCENEPROOF_WORKER_TOKEN` | API server/worker 内部鉴权 | 自行生成的长 ASCII 字符串，不是外部 API key |
+
+可用 `openssl rand -hex 32` 生成 worker token。把所有值只写入 Git 忽略的
+`.env.lumenarium`；不要只执行 `export SCENEPROOF_WORKER_TOKEN="$TOKEN"`，除非已经
+确认 `$TOKEN` 非空。`bootstrap_lumenarium.sh start` 和重启脚本都会自动读取该文件。
 生产默认每个 GPU job 使用 4 个 DeepSearch worker；双 A10 同时处理两个场景时，
 聚合最多 8 个 DeepSearch 请求。Gemini 默认并发 1，并用共享 lock 避免限流失败。
 
@@ -375,6 +400,21 @@ cd "$HOME/Lumenarium"
 bash scripts/bootstrap_lumenarium.sh all
 ```
 
+Tencent Git uses HTTPS with business AD authentication. Enter your business
+AD username and AD password (or a Git access token) when Git prompts; never
+place credentials in the repository or send them to another person. To update
+an existing clean checkout:
+
+```bash
+cd "$HOME/Lumenarium"
+git status --short
+git remote set-url origin https://git.woa.com/USD/BowerPhys.git
+git pull --ff-only origin master
+```
+
+`git status --short` must be empty. Preserve and resolve local experiment
+changes before pulling if it prints any path.
+
 For a non-AD environment, use a Git URL for which you have access. After the
 download completes, edit the generated private configuration:
 
@@ -384,9 +424,22 @@ chmod 600 .env.lumenarium
 vi .env.lumenarium
 ```
 
-At minimum, replace `GPT_API_KEY`, `GPT_ENDPOINT`,
-`OMNIVERSE_DEEPSEARCH_URL`, and `SCENEPROOF_WORKER_TOKEN`. The private
-`.env.lumenarium` file is ignored by Git.
+At minimum configure:
+
+| Variable | Purpose | Required value |
+|---|---|---|
+| `GPT_API_KEY` | S1 scene-graph and semantic analysis | Gemini-compatible vision API key |
+| `GPT_ENDPOINT` | S1 API endpoint | Complete HTTP(S) endpoint |
+| `GPT_MODEL` | S1 model | Model name exposed by the endpoint |
+| `OMNIVERSE_DEEPSEARCH_URL` | S2 asset retrieval | DeepSearch endpoint ending in `/search` |
+| `OMNIVERSE_JWT_TOKEN` | Private DeepSearch authentication | JWT when required; otherwise empty |
+| `SCENEPROOF_WORKER_TOKEN` | Internal server/worker authentication | A self-generated long ASCII value, not an external API key |
+
+Generate the worker token with `openssl rand -hex 32`. Store these values only
+in the Git-ignored `.env.lumenarium`. Do not run
+`export SCENEPROOF_WORKER_TOKEN="$TOKEN"` unless `$TOKEN` is known to be
+non-empty. Both the bootstrap start command and the restart script load the
+private environment file automatically.
 
 Validate everything without starting the service:
 

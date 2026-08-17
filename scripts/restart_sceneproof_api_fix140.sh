@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$HOME/Lumenarium"
+if test -z "${SCENEPROOF_WORKER_TOKEN:-}" && test -s .env.lumenarium; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.lumenarium
+  set +a
+fi
 : "${SCENEPROOF_WORKER_TOKEN:?export the same ASCII SCENEPROOF_WORKER_TOKEN used by the API and workers}"
 mkdir -p logs
 pkill -f 'python.*-m sceneproof_api.worker' 2>/dev/null || true
