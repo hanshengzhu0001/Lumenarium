@@ -118,6 +118,8 @@ class Worker:
                 process_env = os.environ.copy()
                 if requires_cold_rerun(job):
                     process_env["SCENEPROOF_API_FORCE_COLD_RERUN"] = "1"
+                if job.get("parent_job_id") and job.get("trial_index") is not None:
+                    process_env["SCENEPROOF_API_BEST_TRIAL"] = "1"
                 with log_path.open("wb") as log:
                     process = subprocess.Popen(
                         command,

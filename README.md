@@ -107,8 +107,10 @@ sceneproof-result.zip
 V5-best 的三次子任务会由两张 A10 并行领取：前两次同时运行，先空闲的 GPU 再执行
 第三次。三次结束后 selector 仅在 CPU 上读取 geometry、placement、Relation Program
 和证书，通常只需数秒到数十秒。它先比较证书是否通过和 unresolved 数，再比较严重
-碰撞、critical/macro physical、意外碰撞与 relation coverage，并用 trial index 做确定性
-平局裁决。整个过程不读取 GT。按现有 V5-fast 冷启动速度估算，双 A10 墙钟约为两轮
+碰撞、critical/macro physical、意外碰撞、共同 8000px+ 对象的 S1-mask pose
+reprojection IoU/F1 与 relation coverage，并用 trial index 做确定性平局裁决。重投影项
+同时对 translation 偏差和 rotation 造成的轮廓偏差敏感，但它不是 GT 的米制位移或
+SO(3) 误差。整个选择过程不读取 GT。按现有 V5-fast 冷启动速度估算，双 A10 墙钟约为两轮
 冷启动，即约 28 分钟，而有效 GPU 计算约为单次的 3 倍。
 
 ### 从零部署
@@ -481,8 +483,11 @@ For V5-best, the two A10 workers execute the first two trials concurrently;
 the first free worker then executes the third. Selection is CPU-only and
 normally takes seconds to tens of seconds after all trials finish. The fixed
 ranking uses certificate pass, unresolved count, severe collisions, critical
-and macro physical realizability, unintended collisions and relation coverage,
-with trial index as the deterministic final tie-breaker. It never reads GT.
+and macro physical realizability, unintended collisions, S1-mask pose
+reprojection IoU/F1 over common 8000px+ objects, and relation coverage, with
+trial index as the deterministic final tie-breaker. Reprojection is sensitive
+to translation and rotation-induced silhouette errors, but it is not a metric
+translation or SO(3) GT error. The selector never reads GT.
 At the measured V5-fast rate, expect roughly two cold-start rounds, or about
 28 minutes of two-A10 wall time and three times the useful GPU compute of one
 V5-fast run.

@@ -388,6 +388,18 @@ def main() -> None:
             selected, certificate = certify_scene(
                 source, incumbent, candidate, margin=args.margin
             )
+            candidate_visibility = candidate.get("sceneproof_mesh_visibility_audit")
+            if isinstance(candidate_visibility, dict):
+                # This audit is rendered by the guarded candidate branch before
+                # component rollback. Preserve it under an explicit proxy key
+                # rather than claiming that it always describes the final pose.
+                selected["sceneproof_cold_start_pose_proxy_audit"] = {
+                    "schema_version": "sceneproof_cold_start_pose_proxy_audit_v1",
+                    "source": "guarded_candidate_pre_certificate",
+                    "candidate_version": args.candidate_version,
+                    "final_pose_exact": not certificate["rolled_back_objects"],
+                    "mesh_visibility_audit": copy.deepcopy(candidate_visibility),
+                }
             selected["sceneproof_postsim_component_certificate"] = certificate
             output_dir = (
                 args.saved_results

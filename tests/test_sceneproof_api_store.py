@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sceneproof_api.store import JobStore
 from sceneproof_api.worker import STAGE_PATTERN, requires_cold_rerun
+from sceneproof_cold_start_selector import pose_reprojection_proxy
 
 
 class SceneProofJobStoreTest(unittest.TestCase):
@@ -98,6 +99,50 @@ class SceneProofJobStoreTest(unittest.TestCase):
         claimed = self.store.claim(worker_id="host-a:gpu0", lease_seconds=60)
         self.assertEqual(0, claimed["trial_index"])
         self.assertNotEqual(parent["job_id"], claimed["job_id"])
+
+    def test_pose_proxy_uses_only_source_8000px_equivalent_objects(self):
+        proxy = pose_reprojection_proxy({
+            "sceneproof_mesh_visibility_audit": {
+                "resolution": [256, 256],
+                "objects": {
+                    "large": {
+                        "status": "measured", "observed_mask_pixels": 500,
+                        "iou": 0.5, "precision": 0.75, "recall": 0.6,
+                    },
+                    "small": {
+                        "status": "measured", "observed_mask_pixels": 499,
+                        "iou": 1.0, "precision": 1.0, "recall": 1.0,
+                    },
+                },
+            },
+        })
+        self.assertEqual(["large"], list(proxy["objects"]))
+        self.assertAlmostEqual(2 * 0.75 * 0.6 / 1.35,
+                               proxy["objects"]["large"]["f1"])
+
+    def test_pose_proxy_reads_guarded_candidate_envelope(self):
+        proxy = pose_reprojection_proxy({
+            "sceneproof_cold_start_pose_proxy_audit": {
+                "source": "guarded_candidate_pre_certificate",
+                "final_pose_exact": False,
+                "mesh_visibility_audit": {
+                    "resolution": [256, 256],
+                    "objects": {
+                        "chair": {
+                            "status": "measured",
+                            "observed_mask_pixels": 500,
+                            "iou": 0.5,
+                            "precision": 0.5,
+                            "recall": 0.5,
+                        }
+                    },
+                },
+            }
+        })
+        self.assertEqual(["chair"], list(proxy["objects"]))
+        self.assertEqual("guarded_candidate_pre_certificate",
+                         proxy["audit_source"])
+        self.assertFalse(proxy["final_pose_exact"])
 
 
 if __name__ == "__main__":

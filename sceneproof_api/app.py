@@ -176,7 +176,9 @@ async def create_job(
 
 
 def _select_best(parent: dict, children: list[dict]) -> None:
-    from sceneproof_cold_start_selector import high_measure, rank
+    from sceneproof_cold_start_selector import (
+        high_measure, pose_reprojection_proxy, rank,
+    )
 
     selector_started = time.monotonic()
     rows = []
@@ -195,15 +197,43 @@ def _select_best(parent: dict, children: list[dict]) -> None:
             "certificate_passed": bool(evaluation.get("passed")),
             "unresolved_count": len(evaluation.get("unresolved_object_ids", [])),
             "high": high_measure(candidate),
+            "pose_reprojection": pose_reprojection_proxy(
+                json.loads((artifact / "placement.json").read_text(encoding="utf-8"))
+            ),
         }
+        rows.append(row)
+    object_sets = [
+        set(row["pose_reprojection"]["objects"]) for row in rows
+    ]
+    common_pose_objects = sorted(set.intersection(*object_sets)) if object_sets else []
+    for row in rows:
+        objects = row["pose_reprojection"]["objects"]
+        if common_pose_objects:
+            mean_iou = sum(objects[name]["iou"] for name in common_pose_objects) / len(common_pose_objects)
+            mean_f1 = sum(objects[name]["f1"] for name in common_pose_objects) / len(common_pose_objects)
+        else:
+            mean_iou = mean_f1 = 0.0
+        row["pose_reprojection"].update({
+            "common_object_ids": common_pose_objects,
+            "common_object_count": len(common_pose_objects),
+            "mean_iou": mean_iou,
+            "mean_f1": mean_f1,
+        })
         base_rank = rank(row, "high")
         row["rank"] = [
             int(row["certificate_passed"]),
             -row["unresolved_count"],
-            *base_rank,
-            -int(child["trial_index"]),
+            base_rank[0],
+            base_rank[1],
+            base_rank[2],
+            base_rank[3],
+            int(bool(common_pose_objects)),
+            mean_iou,
+            mean_f1,
+            base_rank[4],
+            base_rank[5],
+            -int(row["trial_index"]),
         ]
-        rows.append(row)
     winner = max(rows, key=lambda item: tuple(item["rank"]))
     selected = children[winner["trial_index"]]
     source = Path(selected["artifact_dir"])
@@ -215,7 +245,8 @@ def _select_best(parent: dict, children: list[dict]) -> None:
     selector = {
         "schema_version": "sceneproof_v5_best_selector_v1",
         "gt_free": True,
-        "policy": "certificate_then_unresolved_then_high_physical_v1",
+        "policy": "certificate_physical_pose_reprojection_relation_v2",
+        "pose_proxy_is_not_gt_pose_error": True,
         "selected_candidate_id": winner["candidate_id"],
         "selected_job_id": winner["job_id"],
         "candidates": rows,

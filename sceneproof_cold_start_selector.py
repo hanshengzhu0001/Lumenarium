@@ -44,6 +44,28 @@ def relation_counts(document: dict[str, Any]) -> dict[str, int]:
     return result
 
 
+def relation_coverage(document: dict[str, Any]) -> dict[str, Any]:
+    objects = {
+        object_id for object_id, record in document.get("obj_info", {}).items()
+        if object_id != "scene_camera" and isinstance(record, dict)
+    }
+    covered: set[str] = set()
+    programs = document.get("sceneproof_relation_programs", {}).get("programs", [])
+    for program in programs:
+        for participant in program.get("participants", []):
+            if not isinstance(participant, dict):
+                continue
+            object_id = participant.get("object_id")
+            if object_id in objects:
+                covered.add(object_id)
+    return {
+        "evaluable_object_count": len(objects),
+        "covered_object_count": len(covered),
+        "covered_object_ids": sorted(covered),
+        "coverage": len(covered) / len(objects) if objects else 0.0,
+    }
+
+
 def fast_proxy(document: dict[str, Any]) -> dict[str, Any]:
     objects = document.get("obj_info", {})
     rows = []
@@ -80,6 +102,62 @@ def fast_proxy(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def pose_reprojection_proxy(
+    document: dict[str, Any], *, minimum_source_pixels: int = 8000,
+    source_resolution: int = 1024,
+) -> dict[str, Any]:
+    """Return GT-free mask agreement for source-visible placement objects."""
+    proxy_envelope = document.get("sceneproof_cold_start_pose_proxy_audit", {})
+    if isinstance(proxy_envelope, dict) and isinstance(
+        proxy_envelope.get("mesh_visibility_audit"), dict
+    ):
+        audit = proxy_envelope["mesh_visibility_audit"]
+        audit_source = proxy_envelope.get(
+            "source", "guarded_candidate_pre_certificate"
+        )
+        final_pose_exact = bool(proxy_envelope.get("final_pose_exact", False))
+    else:
+        audit = document.get("sceneproof_mesh_visibility_audit", {})
+        audit_source = "placement_mesh_visibility_audit"
+        final_pose_exact = True
+    resolution = audit.get("resolution", [256, 256])
+    try:
+        width, height = map(int, resolution)
+    except (TypeError, ValueError):
+        width, height = 256, 256
+    scaled_minimum = float(minimum_source_pixels) * (
+        width * height / float(source_resolution * source_resolution)
+    )
+    objects = {}
+    for object_id, record in audit.get("objects", {}).items():
+        if record.get("status") != "measured":
+            continue
+        observed = int(record.get("observed_mask_pixels", 0))
+        if observed < scaled_minimum:
+            continue
+        precision = float(record.get("precision", 0.0))
+        recall = float(record.get("recall", 0.0))
+        f1 = (
+            2.0 * precision * recall / (precision + recall)
+            if precision + recall > 0 else 0.0
+        )
+        objects[object_id] = {
+            "observed_mask_pixels": observed,
+            "iou": float(record.get("iou", 0.0)),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    return {
+        "policy": "gt_free_common_8000px_pose_reprojection_v1",
+        "audit_source": audit_source,
+        "final_pose_exact": final_pose_exact,
+        "audit_resolution": [width, height],
+        "scaled_minimum_observed_pixels": scaled_minimum,
+        "objects": objects,
+    }
+
+
 def high_measure(candidate: dict[str, Any]) -> dict[str, Any]:
     geometry_path = Path(candidate["geometry_path"])
     placement_path = Path(candidate["placement_path"])
@@ -94,6 +172,7 @@ def high_measure(candidate: dict[str, Any]) -> dict[str, Any]:
         or float(row.get("penetration_depth_m", 0.0)) >= 0.25
     ]
     kinds = relation_counts(placement)
+    coverage = relation_coverage(placement)
     attachment_programs = sum(
         kinds.get(kind, 0) for kind in ("PLANE_ATTACH", "CEILING_ATTACH", "HANG")
     )
@@ -101,6 +180,7 @@ def high_measure(candidate: dict[str, Any]) -> dict[str, Any]:
         "metrics": metrics,
         "relation_program_kinds": kinds,
         "relation_program_count": sum(kinds.values()),
+        "relation_program_coverage": coverage,
         "attachment_program_count": attachment_programs,
         "severe_collision_pair_count": len(severe),
         "severe_collision_pairs": [
@@ -126,13 +206,12 @@ def rank(row: dict[str, Any], mode: str) -> tuple[Any, ...]:
     metrics = high["metrics"]
     critical = float(metrics.get("headline_critical_realizability") or 0.0)
     macro = float(metrics.get("headline_macro_realizability") or 0.0)
-    hard_pass = critical > 0.0 and high["severe_collision_pair_count"] <= 2
     return (
-        int(hard_pass),
         -high["severe_collision_pair_count"],
         critical,
         macro,
         -int(metrics.get("unintended_collision_pairs", 0)),
+        high["relation_program_coverage"]["coverage"],
         high["relation_program_count"],
     )
 
