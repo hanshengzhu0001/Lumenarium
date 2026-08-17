@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
+import shutil
+import time
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -23,6 +27,10 @@ ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
 store = JobStore(STATE_ROOT / "jobs.sqlite3")
 app = FastAPI(title="SceneProof API", version="1.0.0")
 UI_PATH = Path(__file__).with_name("ui.html")
+PUBLIC_ARTIFACTS = (
+    "placement.json", "geometry.json", "render.png", "evaluation.json",
+    "result.json", "sceneproof-result.zip",
+)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -88,6 +96,7 @@ def current_release() -> dict:
         "profiles": {
             "fast": "frozen Fix61; no online pose mutation",
             "medium": "Fix61 + presentation-only floor fallback and bounded render suppression",
+            "best": "three independent V5-fast cold starts + GT-free high selector",
         },
         "input": {"formats": ["image/png", "image/jpeg"], "size": [1024, 1024]},
         "camera_policy": "source_s3_scene_camera_locked",
@@ -119,8 +128,8 @@ async def create_job(
         raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail="invalid image") from exc
-    if profile not in {"fast", "medium"}:
-        raise HTTPException(status_code=422, detail="profile must be fast or medium")
+    if profile not in {"fast", "medium", "best"}:
+        raise HTTPException(status_code=422, detail="profile must be fast, medium or best")
     digest = hashlib.sha256(payload).hexdigest()
     rerun_id = uuid.uuid4().hex if (force_rerun or force_cold_rerun) else None
     rerun_kind = "cold" if force_cold_rerun else "profile"
@@ -145,8 +154,140 @@ async def create_job(
         ),
         idempotency_key=key,
         profile=profile,
+        initial_state="waiting" if profile == "best" else "queued",
     )
-    return {"job": _public_job(job), "created": created}
+    if created and profile == "best":
+        for trial_index in range(3):
+            store.create(
+                release_id=RELEASE_ID,
+                input_path=str(provisional),
+                artifact_dir=str(Path(job["artifact_dir"]) / "trials" / f"trial_{trial_index}"),
+                idempotency_key=(
+                    f"{key}:trial:{trial_index}:rerun:cold:{uuid.uuid4().hex}"
+                ),
+                profile="fast",
+                parent_job_id=job["job_id"],
+                trial_index=trial_index,
+            )
+    public = _public_job(job)
+    if profile == "best":
+        public["trials"] = [_public_job(child) for child in store.children(job["job_id"])]
+    return {"job": public, "created": created}
+
+
+def _select_best(parent: dict, children: list[dict]) -> None:
+    from sceneproof_cold_start_selector import high_measure, rank
+
+    selector_started = time.monotonic()
+    rows = []
+    for child in children:
+        artifact = Path(child["artifact_dir"])
+        candidate = {
+            "candidate_id": f"trial_{child['trial_index']}",
+            "geometry_path": str(artifact / "geometry.json"),
+            "placement_path": str(artifact / "placement.json"),
+        }
+        evaluation = json.loads((artifact / "evaluation.json").read_text(encoding="utf-8"))
+        row = {
+            "candidate_id": candidate["candidate_id"],
+            "job_id": child["job_id"],
+            "trial_index": child["trial_index"],
+            "certificate_passed": bool(evaluation.get("passed")),
+            "unresolved_count": len(evaluation.get("unresolved_object_ids", [])),
+            "high": high_measure(candidate),
+        }
+        base_rank = rank(row, "high")
+        row["rank"] = [
+            int(row["certificate_passed"]),
+            -row["unresolved_count"],
+            *base_rank,
+            -int(child["trial_index"]),
+        ]
+        rows.append(row)
+    winner = max(rows, key=lambda item: tuple(item["rank"]))
+    selected = children[winner["trial_index"]]
+    source = Path(selected["artifact_dir"])
+    target = Path(parent["artifact_dir"])
+    target.mkdir(parents=True, exist_ok=True)
+    for name in PUBLIC_ARTIFACTS:
+        if name != "sceneproof-result.zip":
+            shutil.copy2(source / name, target / name)
+    selector = {
+        "schema_version": "sceneproof_v5_best_selector_v1",
+        "gt_free": True,
+        "policy": "certificate_then_unresolved_then_high_physical_v1",
+        "selected_candidate_id": winner["candidate_id"],
+        "selected_job_id": winner["job_id"],
+        "candidates": rows,
+    }
+    evaluation_path = target / "evaluation.json"
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    evaluation["v5_best_selector"] = selector
+    evaluation_path.write_text(json.dumps(evaluation, indent=2) + "\n", encoding="utf-8")
+    result_path = target / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    selected_trial_timing = result.get("timing_seconds", {})
+    trial_seconds = [
+        float((child.get("result") or {}).get("timing_seconds", {}).get("end_to_end", 0.0))
+        for child in children
+    ]
+    result.update({
+        "job_id": parent["job_id"],
+        "profile": "best",
+        "selection_policy": selector["policy"],
+        "selected_trial_job_id": winner["job_id"],
+        "trial_job_ids": [child["job_id"] for child in children],
+        "eligible_for_paper_metrics": True,
+        "selected_trial_timing_seconds": selected_trial_timing,
+        "timing_seconds": {
+            "trial_end_to_end_seconds": trial_seconds,
+            "useful_gpu_seconds": sum(trial_seconds),
+            "two_a10_wall_seconds": time.time() - parent["created_at"],
+            "selector_seconds": time.monotonic() - selector_started,
+        },
+    })
+    result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    with zipfile.ZipFile(target / "sceneproof-result.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in PUBLIC_ARTIFACTS:
+            if name != "sceneproof-result.zip":
+                archive.write(target / name, arcname=name)
+    if not store.finish_selection(
+        parent_job_id=parent["job_id"], succeeded=True, result=result,
+    ):
+        raise RuntimeError("best parent selection lease lost")
+
+
+def _refresh_best(job: dict) -> dict:
+    if job.get("profile") != "best" or job["state"] not in {"waiting", "selecting"}:
+        return job
+    children = store.children(job["job_id"])
+    if job["state"] == "selecting" and time.time() - job["updated_at"] > 300:
+        try:
+            _select_best(job, children)
+        except Exception as error:
+            store.finish_selection(
+                parent_job_id=job["job_id"], succeeded=False,
+                error=repr(error),
+            )
+    elif job["state"] == "waiting" and len(children) == 3:
+        states = {child["state"] for child in children}
+        if states.issubset({"succeeded", "failed", "cancelled"}):
+            if all(child["state"] == "succeeded" for child in children):
+                if store.begin_selection(job["job_id"]):
+                    parent = store.get(job["job_id"])
+                    try:
+                        _select_best(parent, children)
+                    except Exception as error:
+                        store.finish_selection(
+                            parent_job_id=job["job_id"], succeeded=False,
+                            error=repr(error),
+                        )
+            elif store.begin_selection(job["job_id"]):
+                store.finish_selection(
+                    parent_job_id=job["job_id"], succeeded=False,
+                    error="one or more V5-best cold trials failed",
+                )
+    return store.get(job["job_id"])
 
 
 @app.get("/v1/jobs/{job_id}")
@@ -154,7 +295,15 @@ def get_job(job_id: str) -> dict:
     job = store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return _public_job(job)
+    job = _refresh_best(job)
+    public = _public_job(job)
+    if job.get("profile") == "best":
+        children = store.children(job_id)
+        public["trials"] = [_public_job(child) for child in children]
+        if job["state"] == "waiting" and children:
+            public["progress"] = sum(child["progress"] for child in children) / len(children) * 0.96
+            public["stage"] = "best_cold_trials"
+    return public
 
 
 @app.post("/v1/jobs/{job_id}/cancel")
@@ -162,6 +311,9 @@ def cancel_job(job_id: str) -> dict:
     job = store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    if job.get("profile") == "best":
+        for child in store.children(job_id):
+            store.cancel(child["job_id"])
     if not store.cancel(job_id):
         raise HTTPException(status_code=409, detail="job is already terminal")
     return _public_job(store.get(job_id))
@@ -222,7 +374,7 @@ async def worker_artifact(
         job_id=job_id, worker_id=x_worker_id
     ):
         raise HTTPException(status_code=409, detail="lease not owned")
-    allowed = {"placement.json", "render.png", "evaluation.json", "result.json", "sceneproof-result.zip"}
+    allowed = set(PUBLIC_ARTIFACTS)
     if name not in allowed:
         raise HTTPException(status_code=400, detail="unsupported artifact")
     payload = await artifact.read()
@@ -254,7 +406,7 @@ def finish(request: FinishRequest,
         job = store.get(request.job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        required = {"placement.json", "render.png", "evaluation.json", "result.json", "sceneproof-result.zip"}
+        required = set(PUBLIC_ARTIFACTS)
         available = {
             path.name for path in Path(job["artifact_dir"]).glob("*") if path.is_file()
         }

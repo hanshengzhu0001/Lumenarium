@@ -15,7 +15,10 @@ from pathlib import Path
 import requests
 
 
-ARTIFACTS = ("placement.json", "render.png", "evaluation.json", "result.json", "sceneproof-result.zip")
+ARTIFACTS = (
+    "placement.json", "geometry.json", "render.png", "evaluation.json",
+    "result.json", "sceneproof-result.zip",
+)
 STAGE_PATTERN = re.compile(
     r"SCENEPROOF_API_STAGE=([A-Za-z0-9_.:-]+)\s+PROGRESS=([0-9.]+)"
 )

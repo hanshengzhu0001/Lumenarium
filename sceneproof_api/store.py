@@ -62,6 +62,10 @@ class JobStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
             if "profile" not in columns:
                 connection.execute("ALTER TABLE jobs ADD COLUMN profile TEXT NOT NULL DEFAULT 'medium'")
+            if "parent_job_id" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN parent_job_id TEXT")
+            if "trial_index" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN trial_index INTEGER")
 
     @staticmethod
     def _decode(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -82,7 +86,12 @@ class JobStore:
         artifact_dir: str,
         idempotency_key: str | None,
         profile: str = "medium",
+        initial_state: str = "queued",
+        parent_job_id: str | None = None,
+        trial_index: int | None = None,
     ) -> tuple[dict[str, Any], bool]:
+        if initial_state not in {"queued", "waiting"}:
+            raise ValueError(f"invalid initial state: {initial_state}")
         now = time.time()
         job_id = uuid.uuid4().hex
         with self._connect() as connection:
@@ -98,9 +107,12 @@ class JobStore:
             connection.execute(
                 """INSERT INTO jobs(
                     job_id, release_id, idempotency_key, state, stage,
-                    input_path, artifact_dir, created_at, updated_at, profile
-                ) VALUES (?, ?, ?, 'queued', 'queued', ?, ?, ?, ?, ?)""",
-                (job_id, release_id, idempotency_key, input_path, artifact_dir, now, now, profile),
+                    input_path, artifact_dir, created_at, updated_at, profile,
+                    parent_job_id, trial_index
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, release_id, idempotency_key, initial_state,
+                 initial_state, input_path, artifact_dir, now, now, profile,
+                 parent_job_id, trial_index),
             )
             row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id=?", (job_id,)
@@ -115,6 +127,41 @@ class JobStore:
                     "SELECT * FROM jobs WHERE job_id=?", (job_id,)
                 ).fetchone()
             )
+
+    def children(self, parent_job_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY trial_index",
+                (parent_job_id,),
+            ).fetchall()
+            return [self._decode(row) for row in rows]
+
+    def begin_selection(self, parent_job_id: str) -> bool:
+        now = time.time()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE jobs SET state='selecting', stage='best_selecting',
+                   progress=0.97, updated_at=?
+                   WHERE job_id=? AND state='waiting'""",
+                (now, parent_job_id),
+            )
+            return cursor.rowcount == 1
+
+    def finish_selection(
+        self, *, parent_job_id: str, succeeded: bool,
+        result: dict[str, Any] | None = None, error: str | None = None,
+    ) -> bool:
+        now = time.time()
+        state = "succeeded" if succeeded else "failed"
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE jobs SET state=?, stage=?, progress=?, result_json=?,
+                   error=?, updated_at=? WHERE job_id=? AND state='selecting'""",
+                (state, state, 1.0 if succeeded else 0.0,
+                 json.dumps(result) if result is not None else None,
+                 error, now, parent_job_id),
+            )
+            return cursor.rowcount == 1
 
     def owns_active_lease(self, *, job_id: str, worker_id: str) -> bool:
         now = time.time()
@@ -132,7 +179,7 @@ class JobStore:
             cursor = connection.execute(
                 """UPDATE jobs SET state='cancelled', stage='cancelled',
                    lease_expires_at=NULL, updated_at=?
-                   WHERE job_id=? AND state IN ('queued','running')""",
+                   WHERE job_id=? AND state IN ('queued','running','waiting','selecting')""",
                 (now, job_id),
             )
             return cursor.rowcount == 1

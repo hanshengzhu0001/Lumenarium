@@ -80,6 +80,8 @@ visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/AP
 3. 选择模式：
    - **V5-fast**：冻结的 Fix61，速度更快，可用于论文定量；
    - **V5-medium**：Fix61 加 visual-safe 清理，适合展示。
+   - **V5-best**：执行 3 次独立的 V5-fast 冷启动，再以不使用 GT 的
+     SceneProof high selector 选择证书最强的结果。
 4. 点击 **Generate scene**。新图完整运行 S0--S4；字节完全相同的图片复用冻结的
    S0--S3/Fix61 缓存。切换模式时会从共享缓存继续，只运行对应的最终策略。
 5. 等待页面依次显示 S0、S1、S2、S3、S4 完成，然后下载结果 ZIP。
@@ -92,6 +94,7 @@ ZIP 中包含：
 
 ```text
 placement.json     可编辑的物体位姿与关系
+geometry.json      selector 与复核使用的冻结几何快照
 render.png         使用源 S3 相机渲染的最终图片
 evaluation.json    证书、修复、回滚与 unresolved 对象
 result.json        版本、模式、状态和各阶段耗时
@@ -100,6 +103,13 @@ sceneproof-result.zip
 
 `succeeded` 表示流水线与证书通过；`unresolved` 表示已生成结果，但仍有无法安全自动
 修复的可见关系；`failed` 才表示流水线执行失败。
+
+V5-best 的三次子任务会由两张 A10 并行领取：前两次同时运行，先空闲的 GPU 再执行
+第三次。三次结束后 selector 仅在 CPU 上读取 geometry、placement、Relation Program
+和证书，通常只需数秒到数十秒。它先比较证书是否通过和 unresolved 数，再比较严重
+碰撞、critical/macro physical、意外碰撞与 relation coverage，并用 trial index 做确定性
+平局裁决。整个过程不读取 GT。按现有 V5-fast 冷启动速度估算，双 A10 墙钟约为两轮
+冷启动，即约 28 分钟，而有效 GPU 计算约为单次的 3 倍。
 
 ### 从零部署
 
@@ -439,6 +449,8 @@ and render.
    and lens distortion works best.
 3. Choose **V5-fast** for the frozen, paper-eligible Fix61 path, or
    **V5-medium** for Fix61 plus presentation-oriented visual-safe cleanup.
+   Choose **V5-best** to run three independent V5-fast cold starts and select
+   the strongest result with a GT-free SceneProof high selector.
 4. Click **Generate scene**. A new image runs the complete S0--S4 pipeline.
    A byte-identical image reuses the frozen S0--S3/Fix61 cache; switching
    profiles resumes from that shared cache and runs only the selected final
@@ -454,6 +466,7 @@ expect roughly 10--15 minutes per scene.
 
 ```text
 placement.json     structured object poses and relations
+geometry.json      frozen geometry snapshot used by selection and audits
 render.png         source-camera final render
 evaluation.json    certificate, repaired and unresolved objects
 result.json        profile, release and timing summary
@@ -463,6 +476,16 @@ sceneproof-result.zip
 `succeeded` means that the pipeline and certificate passed. `unresolved`
 means that a result was produced but at least one visible relation could not
 be repaired safely. Only `failed` indicates pipeline execution failure.
+
+For V5-best, the two A10 workers execute the first two trials concurrently;
+the first free worker then executes the third. Selection is CPU-only and
+normally takes seconds to tens of seconds after all trials finish. The fixed
+ranking uses certificate pass, unresolved count, severe collisions, critical
+and macro physical realizability, unintended collisions and relation coverage,
+with trial index as the deterministic final tie-breaker. It never reads GT.
+At the measured V5-fast rate, expect roughly two cold-start rounds, or about
+28 minutes of two-A10 wall time and three times the useful GPU compute of one
+V5-fast run.
 
 ## Deploy on the two-A10 host
 

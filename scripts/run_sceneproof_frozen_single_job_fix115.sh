@@ -30,9 +30,13 @@ target="v5_sceneproof_vertical_support_visual_api"
 deepsearch_url="${OMNIVERSE_DEEPSEARCH_URL:-${SCENEPROOF_DEEPSEARCH_URL:-https://miller-unshapeable-melany.ngrok-free.dev/search}}"
 cache_revision="${SCENEPROOF_API_FIX61_CACHE_REVISION:-fix61-v1}"
 cache_base="${SCENEPROOF_API_CACHE_ROOT:-$HOME/Lumenarium/api_cache}/$cache_revision/$input_digest"
-cache_lock="$cache_base.lock"
 force_cold_rerun="${SCENEPROOF_API_FORCE_COLD_RERUN:-0}"
 case "$force_cold_rerun" in 0|1) ;; *) echo "invalid SCENEPROOF_API_FORCE_COLD_RERUN" >&2; exit 2;; esac
+if test "$force_cold_rerun" = "1"; then
+  cache_lock="$cache_base.cold.$job_id.lock"
+else
+  cache_lock="$cache_base.lock"
+fi
 mkdir -p "$root" "$log_root" "$artifact_dir"
 mkdir -p "$(dirname "$cache_base")"
 printf '%s\n' "$scene_id" > "$manifest"
@@ -317,6 +321,12 @@ PY
 cp "$placement" "$artifact_dir/placement.json"
 cp "$render" "$artifact_dir/render.png"
 cp "$evaluation" "$artifact_dir/evaluation.json"
+geometry_json="$(find "$root/${scene_id}_${control}_result/S4_layout_refinement" -maxdepth 1 -name '*_placement_info_s3.json' -type f -print -quit)"
+if ! test -s "$geometry_json"; then
+  echo "SCENEPROOF_API_STOP stage=packaging reason=missing_geometry_snapshot" >&2
+  exit 6
+fi
+cp "$geometry_json" "$artifact_dir/geometry.json"
 
 "$python" - "$artifact_dir/result.json" "$evaluation" "$release_id" "$job_id" "$profile" "$final_version" \
   "$s03_start" "$s03_end" "$fix61_start" "$fix61_end" \
@@ -347,10 +357,10 @@ record = {
     "render_suppressed_object_ids": visual_safe.get("render_suppressed_object_ids", []),
     "eligible_for_paper_metrics": profile == "fast",
     "timing_seconds": timings,
-    "artifacts": ["placement.json", "render.png", "evaluation.json", "result.json", "sceneproof-result.zip"],
+    "artifacts": ["placement.json", "geometry.json", "render.png", "evaluation.json", "result.json", "sceneproof-result.zip"],
 }
 Path(out).write_text(json.dumps(record, indent=2)+"\n")
 print(json.dumps(record))
 PY
 
-(cd "$artifact_dir" && zip -q sceneproof-result.zip placement.json render.png evaluation.json result.json)
+(cd "$artifact_dir" && zip -q sceneproof-result.zip placement.json geometry.json render.png evaluation.json result.json)
