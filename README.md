@@ -1,5 +1,159 @@
 # Lumenarium
 
+[中文](#中文) | [English](#english)
+
+## 中文
+
+**Lumenarium 是一个面向室内场景的单图三维重建系统，结合支撑关系推理、快速语言模型布局优化和可验证的物理修复。**
+
+系统从一张室内图片恢复可编辑的物体、资产、位姿与关系：S0--S3
+负责几何初始化、图像解析、资产检索和姿态估计，S4 使用 SceneLM 优化布局，
+再由 SceneProof 对碰撞、支撑和局部修复进行证书化检查与回滚。
+
+**项目贡献者：** Hansen Zhu、Calvin Gu
+**演示视频：** [Bilibili：Lumenarium 端到端演示](https://www.bilibili.com/video/BV1tpbD6hERB/)
+
+Lumenarium 建立在开源项目
+[Imaginarium](https://github.com/HiHiAllen/Imaginarium) 之上。继承部分的作者、
+许可证和论文引用保留在文末；上述贡献者指本仓库中的 Lumenarium 扩展。
+
+### Demo
+
+下图由双 A10 服务实际生成，不是人工搭建或 GT 场景：
+
+![Lumenarium A10 生成结果](docs/assets/lumenarium_a10_office_demo.png)
+
+### 主要结果
+
+Paper30 只统计可见实例掩码面积不少于 8,000 像素的 Primary 物体。
+GT 仅用于评测，不参与冷启动选择或优化。由于 DeepSearch 姿态工作点仍需重新校准，
+README 主表暂不报告 rotation/translation。
+
+| 版本 | Primary recovery | Primary parent | Physical macro | 定位 |
+|---|---:|---:|---:|---|
+| Imaginarium V1 | 89.49% | **89.32%** | 52.98% | 原始系统基线 |
+| Lumenarium V3 | **91.40%** | 87.80% | 52.14% | 支撑感知精度基线 |
+| V4 DeepSearch | 88.22% | 80.14% | 54.58% | DeepSearch 检索与上游姿态 |
+| **Lumenarium V5-fast / Fix61** | **88.22%** | **80.14%** | **62.10%** | 论文与 API 主版本 |
+
+V5-fast 保持 V4 DeepSearch 的 recovery/parent 工作点，同时把 physical macro
+提高 **7.52 个百分点**。V5-medium 从同一个 Fix61 结果出发，执行保守的
+visual-safe 清理；它可能移动明显悬空的物体，或从最终渲染中隐藏少量无法安全摆放的
+重复叶子物体，因此仅用于展示，不计入论文定量主表。
+
+### 全链路速度
+
+| 阶段 | 平均秒/场景 | Paper30 有效 GPU 小时 | 说明 |
+|---|---:|---:|---|
+| S0 几何/深度 | 9.687 | 0.081 | 相机与房间几何初始化 |
+| S1 图像解析 | 443.036 | 3.692 | 检测、分割、场景图与语义 |
+| S2 DeepSearch 检索 | 137.451 | 1.145 | 三维资产检索 |
+| S3 姿态估计 | 44.790 | 0.373 | 姿态推理与序列化 |
+| 调度开销 | 1.986 | -- | 计时闭合项 |
+| **S0--S3 小计** | **636.949** | **5.308** | 双 A10 实测墙钟时间 2.680 小时 |
+| V5-fast S4：SceneLM + Fix61 | 192.930 | 1.608 | 相对 legacy S4 **3.513x** |
+| **V5-fast S0--S4 总计** | **829.879** | **6.916** | 13.83 分钟/场景 |
+
+Legacy SA-5000 S4 为 677.770 秒/场景。最终 256 samples 的 Paper30 渲染在
+双 A10 上墙钟时间为 415.570 秒，未计入 S0--S4 算力。当前稳定配置下 Gemini
+有效并发为 1；若端点能稳定承载 8 并发并解除全局锁，预计 S1 可降至约
+250--320 秒，V5-fast 冷启动全链路约为 637--707 秒/场景，即预计节省
+123--193 秒、端到端加速约 1.17--1.30x。该区间是容量规划估算，不是论文实测。
+
+### 两项主要创新
+
+1. **支撑感知的场景重建（V1 到 V3）。** 将 floor/wall/ceiling、父子支撑树、
+   堆叠关系和结构缺失回退显式写入场景表示，避免只依赖二维相似度或孤立位姿。
+2. **SceneLM + SceneProof（V4 到 V5）。** 使用关系约束的语言模型优化替代
+   SA-5000 主路径，并把每次修改包装成可审计事务：局部 gate、精确碰撞/支撑检查、
+   aggregate non-regression 和 scoped rollback 共同决定是否提交。
+
+相对 Imaginarium，本仓库还加入 DeepSearch 检索、SAM3/低类别恢复、缺失结构 OBB
+回退、堆叠感知姿态序列化、true-mesh COM/contact/overhang 审计、独立对象 settle、
+visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/API 打包和
+8000px+ Primary 统一评测协议。
+
+### 最简单的使用方式：网页
+
+1. 打开 [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/)。
+2. 上传一张 1024x1024 PNG/JPEG；推荐使用完整室内视图，避免严重裁切和鱼眼畸变。
+3. 选择模式：
+   - **V5-fast**：冻结的 Fix61，速度更快，可用于论文定量；
+   - **V5-medium**：Fix61 加 visual-safe 清理，适合展示。
+4. 点击 **Generate scene**。新图完整运行 S0--S4；字节完全相同的图片复用冻结的
+   S0--S3/Fix61 缓存。切换模式时会从共享缓存继续，只运行对应的最终策略。
+5. 等待页面依次显示 S0、S1、S2、S3、S4 完成，然后下载结果 ZIP。
+
+需要重新运行时有两个不同选项：**Re-run only the selected final profile** 仍复用
+冻结的 S0--S3/Fix61，只重跑最终策略；**Force a new cold S0-S4 run** 会忽略冻结
+缓存并重新执行全部阶段，适合测试随机冷启动，但通常需要 10--15 分钟/场景。
+
+ZIP 中包含：
+
+```text
+placement.json     可编辑的物体位姿与关系
+render.png         使用源 S3 相机渲染的最终图片
+evaluation.json    证书、修复、回滚与 unresolved 对象
+result.json        版本、模式、状态和各阶段耗时
+sceneproof-result.zip
+```
+
+`succeeded` 表示流水线与证书通过；`unresolved` 表示已生成结果，但仍有无法安全自动
+修复的可见关系；`failed` 才表示流水线执行失败。
+
+### 从零部署
+
+最低验证配置为 Linux x86_64、1 张至少 22 GB VRAM 的 GPU、16 逻辑核、64 GB
+内存和 250 GiB 可用空间；生产推荐双 NVIDIA A10、32+ 逻辑核、128 GB 内存与
+500 GB NVMe。完整冷启动还需要 Gemini-compatible 视觉 API 和 DeepSearch
+`/search` 服务。
+
+```bash
+git clone https://git.woa.com/USD/BowerPhys.git Lumenarium
+cd Lumenarium
+bash scripts/bootstrap_lumenarium.sh all
+```
+
+安装脚本会准备 Micromamba/Python 3.11、依赖、Blender 4.3.2、模型权重、资产库与
+派生 embedding/voxel。随后编辑私有配置：
+
+```bash
+cp .env.lumenarium.example .env.lumenarium
+chmod 600 .env.lumenarium
+vi .env.lumenarium
+bash scripts/bootstrap_lumenarium.sh verify
+bash scripts/bootstrap_lumenarium.sh start
+curl -s http://127.0.0.1:8080/healthz
+```
+
+必须配置 `GPT_API_KEY`、`GPT_ENDPOINT`、`GPT_MODEL`、
+`OMNIVERSE_DEEPSEARCH_URL` 和随机生成的 `SCENEPROOF_WORKER_TOKEN`。
+生产默认每个 GPU job 使用 4 个 DeepSearch worker；双 A10 同时处理两个场景时，
+聚合最多 8 个 DeepSearch 请求。Gemini 默认并发 1，并用共享 lock 避免限流失败。
+
+服务日志：
+
+```bash
+tail -F \
+  "$HOME/Lumenarium/logs/sceneproof_api_server.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu0.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu1.log"
+```
+
+### 评测口径与限制
+
+- pose evaluator 先执行 `min-visible-mask-area=8000`，再划分 Primary/Secondary；
+  因此正式 rotation/translation 指标严格是 **8000px+ Primary**。
+- V5-fast 是冻结的定量基线；V5-medium 是展示策略，不能混入论文主表。
+- 缺乏充分证据的结构或 attachment 会标记为 unresolved，而非静默判定成功。
+- DeepSearch 提升检索效率，但 V4 的上游 pose 工作点相对 V3 降低了姿态指标，
+  后续需要通过 pose recalibration/Flux fine-tuning 改进。
+- S1 场景图与视觉 API 延迟仍是最大的全链路性能瓶颈。
+
+---
+
+## English
+
 **Image-to-3D scene reconstruction with support-aware reasoning, fast language-model optimization, and proof-carrying physical repair.**
 
 Lumenarium converts a single indoor image into a structured, editable 3D
@@ -17,9 +171,13 @@ Lumenarium extensions in this repository.
 
 ## Demo
 
-The README gallery uses renders exported from the frozen two-A10 service.
-See the end-to-end [Bilibili demo](https://www.bilibili.com/video/BV1tpbD6hERB/)
-while the curated A10 render set is being refreshed.
+The image below is an actual output from the frozen two-A10 service, not a
+manually assembled or ground-truth scene:
+
+![Lumenarium A10 generation](docs/assets/lumenarium_a10_office_demo.png)
+
+See also the end-to-end
+[Bilibili demo](https://www.bilibili.com/video/BV1tpbD6hERB/).
 
 V5-fast is the quantitative system used for paper metrics. V5-medium starts
 from the same Fix61 result and conservatively repairs visible support failures;
@@ -37,15 +195,12 @@ headline table until the DeepSearch pose operating point is recalibrated.
 | Version | Primary recovery | Primary parent | Physical macro | Positioning |
 |---|---:|---:|---:|---|
 | Imaginarium V1 | 89.49% | **89.32%** | 52.98% | original-system baseline |
-| Lumenarium V3 | **91.40%** | 87.80% | 41.20% fresh evaluator / 52.14% legacy dashboard | support-aware accuracy baseline |
+| Lumenarium V3 | **91.40%** | 87.80% | 52.14% | support-aware accuracy baseline |
 | V4 DeepSearch | 88.22% | 80.14% | 54.58% | retrieval/pose upstream |
 | **Lumenarium V5-fast / Fix61** | **88.22%** | **80.14%** | **62.10%** | main paper and API profile |
 
 V5-fast keeps the V4 DeepSearch recovery and parent operating point while
-improving physical macro by **7.52 percentage points**. V3 physical macro has
-two historical values because the fresh relation-conditioned evaluator and
-the earlier dashboard used different frozen evaluator states; both are shown
-instead of silently mixing protocols.
+improving physical macro by **7.52 percentage points**.
 
 ### Full-chain speed
 
@@ -279,16 +434,23 @@ and render.
 
 ## Use the hosted service
 
-Open [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/),
-upload a 1024x1024 PNG/JPEG, and choose a profile:
+1. Open [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/).
+2. Upload a 1024x1024 PNG/JPEG. A complete indoor view with limited cropping
+   and lens distortion works best.
+3. Choose **V5-fast** for the frozen, paper-eligible Fix61 path, or
+   **V5-medium** for Fix61 plus presentation-oriented visual-safe cleanup.
+4. Click **Generate scene**. A new image runs the complete S0--S4 pipeline.
+   A byte-identical image reuses the frozen S0--S3/Fix61 cache; switching
+   profiles resumes from that shared cache and runs only the selected final
+   policy.
+5. Follow the separate S0, S1, S2, S3 and S4 indicators, then download the
+   result ZIP containing:
 
-- **V5-fast:** frozen Fix61, quantitative and paper-eligible;
-- **V5-medium:** Fix61 plus visual-safe cleanup, presentation-oriented.
-
-New images run the complete S0--S4 pipeline. Byte-identical images reuse the
-frozen S0--S3/Fix61 cache; switching profiles resumes from that shared cache
-and runs only the requested final policy. The UI reports S0, S1, S2, S3 and
-S4 progress separately and packages:
+The two rerun controls have deliberately different semantics. **Re-run only
+the selected final profile** reuses frozen S0--S3/Fix61 and reruns only the
+final policy. **Force a new cold S0-S4 run** bypasses the frozen cache and
+executes every stage again; use it for stochastic cold-start testing and
+expect roughly 10--15 minutes per scene.
 
 ```text
 placement.json     structured object poses and relations
@@ -297,6 +459,10 @@ evaluation.json    certificate, repaired and unresolved objects
 result.json        profile, release and timing summary
 sceneproof-result.zip
 ```
+
+`succeeded` means that the pipeline and certificate passed. `unresolved`
+means that a result was produced but at least one visible relation could not
+be repaired safely. Only `failed` indicates pipeline execution failure.
 
 ## Deploy on the two-A10 host
 
