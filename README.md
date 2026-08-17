@@ -139,6 +139,12 @@ git pull --ff-only origin master
 
 `git status --short` 必须为空；若有输出，先保留并处理本地实验改动，不要直接覆盖。
 
+以上命令仅适用于能够访问工蜂并完成 AD 认证的内网开发机。部署在公有云域的 A10
+主机不能直接访问工蜂；`403` 不是缺少某个应当上传到服务器的密码。A10 使用 WeTERM
+的 `rz` 接收发布 tar 包并覆盖对应源码，实验数据、模型、缓存和 `.env.lumenarium`
+不会包含在发布包中。tar 部署目录默认没有 `.git`，因此在 A10 上执行 `git pull` 报
+`not a git repository` 是预期行为。不要把业务 AD 密码保存到 A10。
+
 安装脚本会准备 Micromamba/Python 3.11、依赖、Blender 4.3.2、模型权重、资产库与
 派生 embedding/voxel。随后编辑私有配置：
 
@@ -414,6 +420,15 @@ git pull --ff-only origin master
 
 `git status --short` must be empty. Preserve and resolve local experiment
 changes before pulling if it prints any path.
+
+These commands apply only to an intranet development host that can reach
+Tencent Git and complete AD authentication. Public-cloud A10 hosts cannot pull
+directly from that authentication domain; HTTP 403 does not mean that an AD
+password should be copied to the server. Deploy release tarballs through
+WeTERM `rz` instead. Release archives contain source changes only and preserve
+datasets, models, caches and the private `.env.lumenarium`. A tar deployment
+has no `.git` directory, so `git pull` failing there is expected. Never store a
+business AD password on an A10 host.
 
 For a non-AD environment, use a Git URL for which you have access. After the
 download completes, edit the generated private configuration:
