@@ -1,8 +1,11 @@
 # Lumenarium
 
-[中文](#中文) | [English](#english)
+> **已部署服务 / Hosted service:** [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/)<br>
+> 上传一张 1024×1024 室内图片，即可获得可编辑布局、最终渲染、质量证书和完整结果包。
 
-## 中文
+[中文说明](#中文说明) · [直接使用](#直接使用已部署的-lumenarium) · [从零部署](#从零部署-lumenarium) · [English guide](#english-guide)
+
+# 中文说明
 
 **Lumenarium 是一个面向室内场景的单图三维重建系统，结合支撑关系推理、快速语言模型布局优化和可验证的物理修复。**
 
@@ -17,13 +20,15 @@ Lumenarium 建立在开源项目
 [Imaginarium](https://github.com/HiHiAllen/Imaginarium) 之上。继承部分的作者、
 许可证和论文引用保留在文末；上述贡献者指本仓库中的 Lumenarium 扩展。
 
-### Demo
+## Demo
 
-下图由双 A10 服务实际生成，不是人工搭建或 GT 场景：
+下列图片由双 A10 上部署的 Lumenarium 直接生成，不是人工搭建或 GT 场景：
 
 ![Lumenarium A10 生成结果](docs/assets/lumenarium_a10_office_demo.png)
 
-### 主要结果
+![Lumenarium A10 客厅生成结果](docs/assets/lumenarium_a10_livingroom_demo.png)
+
+## 主要结果
 
 Paper30 只统计可见实例掩码面积不少于 8,000 像素的 Primary 物体。
 GT 仅用于评测，不参与冷启动选择或优化。由于 DeepSearch 姿态工作点仍需重新校准，
@@ -41,7 +46,7 @@ V5-fast 保持 V4 DeepSearch 的 recovery/parent 工作点，同时把 physical 
 visual-safe 清理；它可能移动明显悬空的物体，或从最终渲染中隐藏少量无法安全摆放的
 重复叶子物体，因此仅用于展示，不计入论文定量主表。
 
-### 全链路速度
+## 全链路速度
 
 | 阶段 | 平均秒/场景 | Paper30 有效 GPU 小时 | 说明 |
 |---|---:|---:|---|
@@ -60,7 +65,7 @@ Legacy SA-5000 S4 为 677.770 秒/场景。最终 256 samples 的 Paper30 渲染
 250--320 秒，V5-fast 冷启动全链路约为 637--707 秒/场景，即预计节省
 123--193 秒、端到端加速约 1.17--1.30x。该区间是容量规划估算，不是论文实测。
 
-### 两项主要创新
+## 两项主要创新
 
 1. **支撑感知的场景重建（V1 到 V3）。** 将 floor/wall/ceiling、父子支撑树、
    堆叠关系和结构缺失回退显式写入场景表示，避免只依赖二维相似度或孤立位姿。
@@ -73,15 +78,19 @@ Legacy SA-5000 S4 为 677.770 秒/场景。最终 256 samples 的 Paper30 渲染
 visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/API 打包和
 8000px+ Primary 统一评测协议。
 
-### 最简单的使用方式：网页
+## 直接使用已部署的 Lumenarium
+
+> **不需要安装代码、Blender、模型或数据。** 技术美术和评审用户应优先使用网页；只有维护者、研究复现或私有部署才需要执行后面的安装流程。
 
 1. 打开 [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/)。
 2. 上传一张 1024x1024 PNG/JPEG；推荐使用完整室内视图，避免严重裁切和鱼眼畸变。
 3. 选择模式：
-   - **V5-fast**：冻结的 Fix61，速度更快，可用于论文定量；
-   - **V5-medium**：Fix61 加 visual-safe 清理，适合展示。
-   - **V5-best**：执行 3 次独立的 V5-fast 冷启动，再以不使用 GT 的
-     SceneProof high selector 选择证书最强的结果。
+
+   | 模式 | 适合场景 | 行为 |
+   |---|---|---|
+   | **V5-fast** | 论文定量、快速预览 | 冻结 Fix61，不执行展示性删除 |
+   | **V5-medium** | 演示、技术美术交付 | Fix61 + 保守 visual-safe 清理 |
+   | **V5-best** | 最终精选 | 3 次不同 seed 的 V5-fast 冷启动，再用无 GT selector 选最好结果 |
 4. 点击 **Generate scene**。新图完整运行 S0--S4；字节完全相同的图片复用冻结的
    S0--S3/Fix61 缓存。切换模式时会从共享缓存继续，只运行对应的最终策略。
 5. 等待页面依次显示 S0、S1、S2、S3、S4 完成，然后下载结果 ZIP。
@@ -113,12 +122,18 @@ reprojection IoU/F1 与 relation coverage，并用 trial index 做确定性平�
 SO(3) 误差。整个选择过程不读取 GT。按现有 V5-fast 冷启动速度估算，双 A10 墙钟约为两轮
 冷启动，即约 28 分钟，而有效 GPU 计算约为单次的 3 倍。
 
-### 从零部署
+## 从零部署 Lumenarium
 
-最低验证配置为 Linux x86_64、1 张至少 22 GB VRAM 的 GPU、16 逻辑核、64 GB
+> **目标：** 从一个干净的 Linux x86_64 主机开始，用仓库脚本准备 Python、Blender、模型、资产和 API 服务。密钥只写入被 Git 忽略的 `.env.lumenarium`，任何 Agent 都不应把密钥输出到日志、提交或聊天。
+
+### 1. 检查最低配置
+
+最低验证配置为 Linux x86_64、1 张至少 22 GB VRAM 的 NVIDIA GPU、16 逻辑核、64 GB
 内存和 250 GiB 可用空间；生产推荐双 NVIDIA A10、32+ 逻辑核、128 GB 内存与
 500 GB NVMe。完整冷启动还需要 Gemini-compatible 视觉 API 和 DeepSearch
 `/search` 服务。
+
+### 2. 获取代码并执行一次性安装
 
 ```bash
 git clone https://git.woa.com/USD/BowerPhys.git Lumenarium
@@ -145,34 +160,73 @@ git pull --ff-only origin master
 不会包含在发布包中。tar 部署目录默认没有 `.git`，因此在 A10 上执行 `git pull` 报
 `not a git repository` 是预期行为。不要把业务 AD 密码保存到 A10。
 
-安装脚本会准备 Micromamba/Python 3.11、依赖、Blender 4.3.2、模型权重、资产库与
-派生 embedding/voxel。随后编辑私有配置：
+安装脚本会准备 Micromamba/Python 3.11、CUDA/Python 依赖、Blender 4.3.2、模型权重、
+资产库与派生 embedding/voxel，并创建 `.env.lumenarium` 模板。模型和数据不存入 Git；
+首次下载需要可访问 Hugging Face，受限模型需要先设置 `HF_TOKEN`。
+
+### 3. 配置两类外部 API 和内部 worker token
 
 ```bash
 cp .env.lumenarium.example .env.lumenarium
 chmod 600 .env.lumenarium
 vi .env.lumenarium
-bash scripts/bootstrap_lumenarium.sh verify
-bash scripts/bootstrap_lumenarium.sh start
-curl -s http://127.0.0.1:8080/healthz
 ```
 
 必须配置：
 
 | 配置项 | 用途 | 要求 |
 |---|---|---|
-| `GPT_API_KEY` | S1 场景图与语义分析 | Gemini-compatible 视觉 API key |
+| `GPT_API_KEY` | S1 场景图与语义分析 | Gemini-compatible 视觉 API JWT/key；不是 Omniverse token |
 | `GPT_ENDPOINT` | S1 API 地址 | 完整 HTTP(S) endpoint |
 | `GPT_MODEL` | S1 模型 | 部署端实际开放的模型名 |
 | `OMNIVERSE_DEEPSEARCH_URL` | S2 资产检索 | 以 `/search` 结尾的 DeepSearch 地址 |
-| `OMNIVERSE_JWT_TOKEN` | 私有 DeepSearch 鉴权 | endpoint 要求 JWT 时填写，否则留空 |
+| `OMNIVERSE_JWT_TOKEN` | 私有 DeepSearch 鉴权 | Omniverse/DeepSearch JWT；不是 LightAI key |
 | `SCENEPROOF_WORKER_TOKEN` | API server/worker 内部鉴权 | 自行生成的长 ASCII 字符串，不是外部 API key |
+
+配置文件必须是 UTF-8/LF，每行严格使用 `KEY=value`，等号两侧不要留空格：
+
+```dotenv
+GPT_API_KEY=replace-with-current-lightai-or-gemini-key
+GPT_ENDPOINT=https://your-gemini-compatible-endpoint
+GPT_MODEL=your-enabled-model-name
+OMNIVERSE_DEEPSEARCH_URL=https://your-deepsearch-host/search
+OMNIVERSE_JWT_TOKEN=
+SCENEPROOF_WORKER_TOKEN=replace-with-random-ascii-token
+SCENEPROOF_API_GPU_IDS=0,1
+SCENEPROOF_API_DEEPSEARCH_WORKERS=4
+```
+
+若文件从 Windows 复制而来，启动前运行 `sed -i 's/\r$//' .env.lumenarium`。不要把
+`export`、提示文字或 Markdown 代码围栏粘进配置文件。
 
 可用 `openssl rand -hex 32` 生成 worker token。把所有值只写入 Git 忽略的
 `.env.lumenarium`；不要只执行 `export SCENEPROOF_WORKER_TOKEN="$TOKEN"`，除非已经
 确认 `$TOKEN` 非空。`bootstrap_lumenarium.sh start` 和重启脚本都会自动读取该文件。
 生产默认每个 GPU job 使用 4 个 DeepSearch worker；双 A10 同时处理两个场景时，
 聚合最多 8 个 DeepSearch 请求。Gemini 默认并发 1，并用共享 lock 避免限流失败。
+
+若 DeepSearch 需要短期 JWT，推荐让 `.env.lumenarium` 指向本机代理：
+
+```bash
+OMNIVERSE_DEEPSEARCH_URL=http://127.0.0.1:9192/search
+```
+
+代理入口为 `tools/deepsearch_proxy.py`。先把 JWT 写入权限为 `600` 的私有文件，再由代理
+读取；不要把 JWT 写进命令历史或 README。
+
+### 4. 验证并启动完整 S0--S4 服务
+
+```bash
+bash scripts/bootstrap_lumenarium.sh verify
+bash scripts/bootstrap_lumenarium.sh start
+curl -s http://127.0.0.1:8080/healthz
+```
+
+`verify` 必须依次通过 GPU、SAM3、Blender、路径和配置检查；`start` 会启动一个 API
+server，并为每张选中的 GPU 启动一个 worker。新图片运行完整 S0--S4；只有字节完全相同
+的输入才会复用冻结缓存。
+
+### 5. 检查服务与日志
 
 服务日志：
 
@@ -183,7 +237,7 @@ tail -F \
   "$HOME/Lumenarium/logs/sceneproof_api_gpu1.log"
 ```
 
-### 评测口径与限制
+## 评测口径与限制
 
 - pose evaluator 先执行 `min-visible-mask-area=8000`，再划分 Primary/Secondary；
   因此正式 rotation/translation 指标严格是 **8000px+ Primary**。
@@ -195,7 +249,7 @@ tail -F \
 
 ---
 
-## English
+# English guide
 
 **Image-to-3D scene reconstruction with support-aware reasoning, fast language-model optimization, and proof-carrying physical repair.**
 

@@ -24,8 +24,28 @@ import pyassimp
 import functools
 import pickle
 import tempfile
+import random
 from itertools import product
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _configure_lumenarium_trial_seed():
+    raw = os.environ.get("LUMENARIUM_TRIAL_SEED", "").strip()
+    if not raw:
+        return None
+    seed = int(raw) & 0x7FFFFFFF
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    try:
+        bpy.context.scene.cycles.seed = seed
+    except Exception:
+        pass
+    print(f"[Lumenarium] Trial seed: {seed}", flush=True)
+    return seed
+
+
+_LUMENARIUM_TRIAL_SEED = _configure_lumenarium_trial_seed()
 
 
 class _NumPyCompatUnpickler(pickle.Unpickler):

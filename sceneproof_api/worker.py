@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -26,6 +27,13 @@ STAGE_PATTERN = re.compile(
 
 def requires_cold_rerun(job: dict) -> bool:
     return ":rerun:cold:" in (job.get("idempotency_key") or "")
+
+
+def trial_seed(job: dict) -> int:
+    """Return a stable, distinct seed for this concrete job/trial."""
+    material = f"{job['job_id']}:{job.get('trial_index', 'single')}"
+    digest = hashlib.sha256(material.encode("ascii")).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
 
 
 class Worker:
@@ -116,6 +124,9 @@ class Worker:
                     job.get("profile", "medium"),
                 ]
                 process_env = os.environ.copy()
+                seed = trial_seed(job)
+                process_env["LUMENARIUM_TRIAL_SEED"] = str(seed)
+                process_env["PYTHONHASHSEED"] = str(seed)
                 if requires_cold_rerun(job):
                     process_env["SCENEPROOF_API_FORCE_COLD_RERUN"] = "1"
                 if job.get("parent_job_id") and job.get("trial_index") is not None:

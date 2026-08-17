@@ -1,40 +1,46 @@
-# SceneProof V5 API deployment
+# Lumenarium API deployment
 
-The coordinator exposes a browser UI and REST API. Two GPU workers, one per
-A10, claim jobs through SQLite-backed leases. The profiles are:
+This is the operator quick reference. The canonical zero-to-running guide is
+[`README.md`](README.md#start-from-a-clean-machine); do not maintain a second,
+divergent install procedure here.
 
-- `fast`: DeepSearch S0--S3 + SceneLM/Fix61.
-- `medium`: V5-fast + SceneProof/Fix114.
+## Profiles
 
-Each successful job provides `placement.json`, `render.png`, `evaluation.json`,
-`result.json`, and `sceneproof-result.zip`. `placement.json` is the authoritative
-scene representation for Blender/UE import; it is not a standalone interactive
-viewer. The web UI previews `render.png` and downloads the ZIP.
+| Profile | Production behavior | Paper metrics |
+|---|---|---|
+| `fast` | frozen SceneLM/Fix61 | eligible |
+| `medium` | Fix61 plus bounded visual-safe cleanup | presentation only |
+| `best` | three independently seeded cold `fast` trials plus GT-free selection | selector report required |
 
-## Start coordinator
+## Start or restart
+
+The private `.env.lumenarium` must already contain the Gemini-compatible visual
+API configuration, DeepSearch URL and a self-generated ASCII worker token.
 
 ```bash
 cd "$HOME/Lumenarium"
-PY="$HOME/.venvs/lumenarium-py311/bin/python"
-"$PY" -m pip install -r requirements-api.txt
-export SCENEPROOF_WORKER_TOKEN='replace-with-a-long-random-token'
-nohup bash scripts/run_sceneproof_api_server_fix115.sh \
-  > "$HOME/Lumenarium/logs/sceneproof_api_server.log" 2>&1 < /dev/null &
+bash scripts/bootstrap_lumenarium.sh verify
+bash scripts/bootstrap_lumenarium.sh start
+curl -s http://127.0.0.1:8080/healthz
 ```
 
-## Start one worker per A10
-
-Run both commands with the same token and coordinator URL:
+Monitor the coordinator and one worker per selected GPU:
 
 ```bash
-export SCENEPROOF_WORKER_TOKEN='replace-with-a-long-random-token'
-export SCENEPROOF_API_URL='http://127.0.0.1:8080'
-nohup bash scripts/run_sceneproof_api_worker_fix115.sh 0 \
-  > "$HOME/Lumenarium/logs/sceneproof_api_gpu0.log" 2>&1 < /dev/null &
-nohup bash scripts/run_sceneproof_api_worker_fix115.sh 1 \
-  > "$HOME/Lumenarium/logs/sceneproof_api_gpu1.log" 2>&1 < /dev/null &
+tail -F \
+  "$HOME/Lumenarium/logs/sceneproof_api_server.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu0.log" \
+  "$HOME/Lumenarium/logs/sceneproof_api_gpu1.log"
 ```
 
-Open `http://HOST:8080/` in a browser. Before exposing it outside a trusted
-network, put TLS and user authentication in front of the coordinator. Worker
-authentication does not authenticate public users.
+The public UI is deployed at
+[https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/).
+TLS and public-user access control are provided by the upstream gateway; the
+worker token authenticates workers only and must never be exposed to browsers.
+
+## Outputs
+
+Every completed job packages `placement.json`, `geometry.json`, `render.png`,
+`evaluation.json`, `result.json` and `sceneproof-result.zip`. New inputs execute
+S0--S4. Byte-identical inputs may reuse the frozen S0--S3/Fix61 cache; the UI's
+seeded cold-rerun control explicitly bypasses it.

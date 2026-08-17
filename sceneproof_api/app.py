@@ -25,7 +25,7 @@ ARTIFACT_ROOT = STATE_ROOT / "artifacts"
 INPUT_ROOT.mkdir(parents=True, exist_ok=True)
 ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
 store = JobStore(STATE_ROOT / "jobs.sqlite3")
-app = FastAPI(title="SceneProof API", version="1.0.0")
+app = FastAPI(title="Lumenarium API", version="1.0.0")
 UI_PATH = Path(__file__).with_name("ui.html")
 PUBLIC_ARTIFACTS = (
     "placement.json", "geometry.json", "render.png", "evaluation.json",
@@ -37,9 +37,9 @@ PUBLIC_ARTIFACTS = (
 def user_interface() -> str:
     return UI_PATH.read_text(encoding="utf-8")
     # Legacy inline UI retained below for source-package compatibility.
-    return """<!doctype html><html><head><meta charset='utf-8'><title>SceneProof</title>
+    return """<!doctype html><html><head><meta charset='utf-8'><title>Lumenarium</title>
 <style>body{font:16px system-ui;max-width:760px;margin:48px auto;padding:0 20px}button,select,input{font:inherit;margin:8px 0;padding:8px}pre{background:#f4f4f4;padding:12px;white-space:pre-wrap}img{max-width:100%}</style></head>
-<body><h1>SceneProof</h1><p>Upload a 1024×1024 PNG/JPEG and select a quality profile.</p>
+<body><h1>Lumenarium</h1><p>Upload a 1024 x 1024 PNG/JPEG and select a quality profile.</p>
 <form id='f'><input name='image' type='file' accept='image/png,image/jpeg' required><br>
 <select name='profile'><option value='fast'>V5-fast — frozen Fix61</option><option value='medium' selected>V5-medium — Fix61 + visual-safe cleanup</option></select><br>
 <button>Generate scene</button></form><pre id='s'>Ready</pre><div id='o'></div>

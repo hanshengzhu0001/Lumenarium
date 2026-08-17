@@ -31,7 +31,17 @@ deepsearch_url="${OMNIVERSE_DEEPSEARCH_URL:-${SCENEPROOF_DEEPSEARCH_URL:-https:/
 cache_revision="${SCENEPROOF_API_FIX61_CACHE_REVISION:-fix61-v1}"
 cache_base="${SCENEPROOF_API_CACHE_ROOT:-$HOME/Lumenarium/api_cache}/$cache_revision/$input_digest"
 force_cold_rerun="${SCENEPROOF_API_FORCE_COLD_RERUN:-0}"
+trial_seed="${LUMENARIUM_TRIAL_SEED:-}"
 case "$force_cold_rerun" in 0|1) ;; *) echo "invalid SCENEPROOF_API_FORCE_COLD_RERUN" >&2; exit 2;; esac
+if ! [[ "$trial_seed" =~ ^[0-9]+$ ]]; then
+  trial_seed="$($python - "$job_id" <<'PY'
+import hashlib, sys
+print(int.from_bytes(hashlib.sha256(sys.argv[1].encode("ascii")).digest()[:4], "big") & 0x7fffffff)
+PY
+)"
+  export LUMENARIUM_TRIAL_SEED="$trial_seed"
+  export PYTHONHASHSEED="$trial_seed"
+fi
 if test "$force_cold_rerun" = "1"; then
   cache_lock="$cache_base.cold.$job_id.lock"
 else
@@ -50,6 +60,7 @@ flock 9
 if test "$force_cold_rerun" = "1"; then
   echo "SCENEPROOF_API_STAGE=force_cold_rerun PROGRESS=0.02"
 fi
+echo "SCENEPROOF_API_TRIAL_SEED=$trial_seed"
 if test "$force_cold_rerun" != "1" && test -s "$cache_base/READY"; then
   echo "SCENEPROOF_API_STAGE=frozen_fix61_cache_hit PROGRESS=0.70"
   cached_scene_id="$(head -1 "$cache_base/SCENE_ID" 2>/dev/null || true)"
@@ -63,9 +74,29 @@ if test "$force_cold_rerun" != "1" && test -s "$cache_base/READY"; then
   s03_end="$(now_ns)"
   fix61_end="$s03_end"
 else
-  probe="$(curl --fail --show-error --silent --max-time 30 \
-    --request POST --header 'Content-Type: application/json' \
-    --data '{"description":"house","limit":2}' "$deepsearch_url")" || {
+  probe="$($python - "$deepsearch_url" <<'PY'
+import json
+import os
+import sys
+
+import requests
+
+url = sys.argv[1]
+token = os.environ.get("OMNIVERSE_JWT_TOKEN", "").strip()
+auth = ("$omni-api-token", token) if token else None
+response = requests.post(
+    url,
+    json={"description": "chair", "limit": 1},
+    auth=auth,
+    timeout=30,
+)
+response.raise_for_status()
+payload = response.json()
+if not isinstance(payload, list) or not payload:
+    raise RuntimeError("DeepSearch response must be a non-empty list")
+print(json.dumps(payload))
+PY
+  )" || {
     echo "SCENEPROOF_API_STAGE=deepsearch_unavailable PROGRESS=0.0" >&2
     exit 3
   }
@@ -333,7 +364,7 @@ cp "$geometry_json" "$artifact_dir/geometry.json"
   "$s03_start" "$s03_end" "$fix61_start" "$fix61_end" \
   "$fix114_start" "$fix114_end" "$render_start" "$render_end" \
   "$full_start" "$full_end" <<'PY'
-import json, sys
+import json, os, sys
 from pathlib import Path
 out, evaluation, release_id, job_id, profile, final_version, *raw = sys.argv[1:]
 values = list(map(int, raw))
@@ -351,6 +382,7 @@ record = {
     "release_id": release_id,
     "status": final_eval["status"],
     "profile": profile,
+    "trial_seed": int(os.environ["LUMENARIUM_TRIAL_SEED"]),
     "final_version": final_version,
     "certificate_strength": strength,
     "unresolved_object_ids": final_eval.get("unresolved_object_ids", []),

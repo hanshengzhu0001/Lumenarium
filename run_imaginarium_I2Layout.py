@@ -17,6 +17,35 @@ import sys
 import os
 import time
 
+
+def _configure_trial_seed():
+    """Seed local stochastic stages from the API trial identity."""
+    raw = os.environ.get("LUMENARIUM_TRIAL_SEED", "").strip()
+    if not raw:
+        return None
+    seed = int(raw) & 0x7FFFFFFF
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+    import random
+    random.seed(seed)
+
+    try:
+        import numpy as np
+        np.random.seed(seed)
+    except ImportError:
+        pass
+
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass
+
+    print(f"LUMENARIUM_TRIAL_SEED={seed}", flush=True)
+    return seed
+
 def _load_local_env(path=".env"):
     """Load simple KEY=VALUE settings without overriding exported variables."""
     if not os.path.isfile(path):
@@ -36,6 +65,7 @@ def _load_local_env(path=".env"):
 
 def main():
     _load_local_env()
+    _configure_trial_seed()
     parser = argparse.ArgumentParser(
         description="Imaginarium: Vision-guided 3D Scene Layout Generation",
         formatter_class=argparse.RawDescriptionHelpFormatter,

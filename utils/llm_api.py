@@ -314,6 +314,9 @@ class GPTApi(BaseApi):
             "maxOutputTokens": max_output_tokens,
             "temperature": kwargs.get("temperature", 0),
         }
+        trial_seed = os.environ.get("LUMENARIUM_TRIAL_SEED", "").strip()
+        if trial_seed:
+            generation_config["seed"] = int(trial_seed) & 0x7FFFFFFF
         response_mime_type = os.environ.get("IMAGINARIUM_GEMINI_RESPONSE_MIME_TYPE", "").strip()
         if response_mime_type:
             generation_config["responseMimeType"] = response_mime_type
