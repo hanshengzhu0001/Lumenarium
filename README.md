@@ -24,9 +24,16 @@ Lumenarium 建立在开源项目
 
 下列图片由双 A10 上部署的 Lumenarium 直接生成，不是人工搭建或 GT 场景：
 
-![Lumenarium A10 生成结果](docs/assets/lumenarium_a10_office_demo.png)
-
-![Lumenarium A10 客厅生成结果](docs/assets/lumenarium_a10_livingroom_demo.png)
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/lumenarium_a10_office_demo.png" alt="Lumenarium A10 办公室生成结果"></td>
+    <td width="50%"><img src="docs/assets/lumenarium_a10_livingroom_demo.png" alt="Lumenarium A10 客厅生成结果"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>办公室场景</b></td>
+    <td align="center"><b>客厅场景</b></td>
+  </tr>
+</table>
 
 ## 主要结果
 
@@ -172,15 +179,16 @@ chmod 600 .env.lumenarium
 vi .env.lumenarium
 ```
 
-必须配置：
+必须配置。由于继承代码需要兼容旧接口，三个 Gemini 配置项仍保留 `GPT_*` 名称；
+**当前生产路径实际调用 Gemini-compatible 多模态模型，不是 OpenAI GPT。**
 
 | 配置项 | 用途 | 要求 |
 |---|---|---|
-| `GPT_API_KEY` | S1 场景图与语义分析 | Gemini-compatible 视觉 API JWT/key；不是 Omniverse token |
-| `GPT_ENDPOINT` | S1 API 地址 | 完整 HTTP(S) endpoint |
-| `GPT_MODEL` | S1 模型 | 部署端实际开放的模型名 |
-| `OMNIVERSE_DEEPSEARCH_URL` | S2 资产检索 | 以 `/search` 结尾的 DeepSearch 地址 |
-| `OMNIVERSE_JWT_TOKEN` | 私有 DeepSearch 鉴权 | Omniverse/DeepSearch JWT；不是 LightAI key |
+| `GPT_API_KEY` | S1 场景图与语义分析 | Gemini-compatible 视觉 API key/JWT；变量名仅为历史兼容 |
+| `GPT_ENDPOINT` | S1 Gemini API 地址 | 完整 HTTP(S) Gemini-compatible endpoint |
+| `GPT_MODEL` | S1 Gemini 模型 | 服务端实际开放的 Gemini 模型名 |
+| `OMNIVERSE_DEEPSEARCH_URL` | S2 资产检索 | 可直接访问且以 `/search` 结尾的 HTTP(S) 地址；本机代理推荐 `http://127.0.0.1:9192/search` |
+| `OMNIVERSE_JWT_TOKEN` | 私有 DeepSearch 鉴权 | endpoint 直接要求 JWT 时填写；使用本机代理时留空 |
 | `SCENEPROOF_WORKER_TOKEN` | API server/worker 内部鉴权 | 自行生成的长 ASCII 字符串，不是外部 API key |
 
 配置文件必须是 UTF-8/LF，每行严格使用 `KEY=value`，等号两侧不要留空格：
@@ -205,14 +213,40 @@ SCENEPROOF_API_DEEPSEARCH_WORKERS=4
 生产默认每个 GPU job 使用 4 个 DeepSearch worker；双 A10 同时处理两个场景时，
 聚合最多 8 个 DeepSearch 请求。Gemini 默认并发 1，并用共享 lock 避免限流失败。
 
-若 DeepSearch 需要短期 JWT，推荐让 `.env.lumenarium` 指向本机代理：
+#### DeepSearch URL 与 JWT 如何获得
+
+`OMNIVERSE_DEEPSEARCH_URL` 不是浏览器中的 `omniverse://...` 地址。它必须是实现
+Lumenarium `/search` JSON contract 的 HTTP(S) endpoint。腾讯环境推荐使用仓库自带
+代理：先从 [Omniverse Web](https://ov.qq.com/omni/web3/omniverse://ov.qq.com:443/)
+登录并获取当前 JWT，然后在 A10 上安全启动代理：
+
+```bash
+cd "$HOME/Lumenarium"
+read -rsp "Omniverse DeepSearch JWT: " OMNI_JWT; echo
+printf '%s' "$OMNI_JWT" > /tmp/lumenarium_omni.jwt
+chmod 600 /tmp/lumenarium_omni.jwt
+unset OMNI_JWT
+
+nohup env \
+  OMNIVERSE_JWT_TOKEN_FILE=/tmp/lumenarium_omni.jwt \
+  OMNIVERSE_DEEPSEARCH_BASE=https://ov.qq.com \
+  OMNIVERSE_PROXY_PORT=9192 \
+  "$HOME/.venvs/lumenarium-py311/bin/python" -u tools/deepsearch_proxy.py \
+  > "$HOME/Lumenarium/logs/deepsearch_proxy.log" 2>&1 < /dev/null &
+
+tail -F "$HOME/Lumenarium/logs/deepsearch_proxy.log"
+```
+
+看到 `DeepSearch proxy ready on :9192` 后，在 `.env.lumenarium` 中使用：
 
 ```bash
 OMNIVERSE_DEEPSEARCH_URL=http://127.0.0.1:9192/search
+OMNIVERSE_JWT_TOKEN=
 ```
 
-代理入口为 `tools/deepsearch_proxy.py`。先把 JWT 写入权限为 `600` 的私有文件，再由代理
-读取；不要把 JWT 写进命令历史或 README。
+JWT 会过期；出现 HTTP 401 时，从上述页面获取新 JWT 并重启代理。不要把 JWT 写进
+README、Git、命令行参数或共享日志。若团队已经提供带鉴权的 HTTPS `/search` 服务，
+可直接把该地址填入 `OMNIVERSE_DEEPSEARCH_URL`，无需启动本机代理。
 
 ### 4. 验证并启动完整 S0--S4 服务
 
@@ -493,16 +527,26 @@ chmod 600 .env.lumenarium
 vi .env.lumenarium
 ```
 
-At minimum configure:
+At minimum configure the following values. The `GPT_*` names are retained for
+backward compatibility with inherited code; the production S1 path uses a
+**Gemini-compatible multimodal model, not OpenAI GPT**.
 
 | Variable | Purpose | Required value |
 |---|---|---|
-| `GPT_API_KEY` | S1 scene-graph and semantic analysis | Gemini-compatible vision API key |
-| `GPT_ENDPOINT` | S1 API endpoint | Complete HTTP(S) endpoint |
-| `GPT_MODEL` | S1 model | Model name exposed by the endpoint |
-| `OMNIVERSE_DEEPSEARCH_URL` | S2 asset retrieval | DeepSearch endpoint ending in `/search` |
-| `OMNIVERSE_JWT_TOKEN` | Private DeepSearch authentication | JWT when required; otherwise empty |
+| `GPT_API_KEY` | S1 scene-graph and semantic analysis | Gemini-compatible vision API key/JWT; legacy variable name |
+| `GPT_ENDPOINT` | S1 Gemini API endpoint | Complete HTTP(S) Gemini-compatible endpoint |
+| `GPT_MODEL` | S1 Gemini model | Gemini model name exposed by the endpoint |
+| `OMNIVERSE_DEEPSEARCH_URL` | S2 asset retrieval | Reachable HTTP(S) `/search` endpoint; local proxy default is `http://127.0.0.1:9192/search` |
+| `OMNIVERSE_JWT_TOKEN` | Private DeepSearch authentication | JWT for direct authenticated endpoints; empty when using the local proxy |
 | `SCENEPROOF_WORKER_TOKEN` | Internal server/worker authentication | A self-generated long ASCII value, not an external API key |
+
+The browser `omniverse://` URI is not a valid DeepSearch URL. In Tencent's
+environment, obtain a current JWT from
+[Omniverse Web](https://ov.qq.com/omni/web3/omniverse://ov.qq.com:443/), run
+`tools/deepsearch_proxy.py` as documented in the
+[Chinese DeepSearch setup](#deepsearch-url-与-jwt-如何获得), and point
+`OMNIVERSE_DEEPSEARCH_URL` at `http://127.0.0.1:9192/search`. Refresh and
+restart the proxy when the upstream returns HTTP 401. Never commit the JWT.
 
 Generate the worker token with `openssl rand -hex 32`. Store these values only
 in the Git-ignored `.env.lumenarium`. Do not run
