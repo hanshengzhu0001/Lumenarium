@@ -8,7 +8,7 @@ test "$#" -eq 5 || {
 job_id="$1" input="$2" artifact_dir="$3" gpu="$4" profile="$5"
 [[ "$job_id" =~ ^[0-9a-f]{32}$ ]] || { echo "invalid job id" >&2; exit 2; }
 [[ "$gpu" =~ ^[0-9]+$ ]] || { echo "invalid GPU id" >&2; exit 2; }
-case "$profile" in fast|medium) ;; *) echo "invalid profile" >&2; exit 2;; esac
+case "$profile" in fast|medium|best) ;; *) echo "invalid profile" >&2; exit 2;; esac
 
 cd "$HOME/Lumenarium"
 python="${IMAGINARIUM_PYTHON:-$HOME/.venvs/lumenarium-py311/bin/python}"
@@ -225,6 +225,8 @@ upstream_evaluation="$root/sceneba_audit/$baseline/certificate.json"
 incumbent_version="$baseline"
 if test "$profile" = "medium"; then
   echo "SCENEPROOF_API_STAGE=s4_fix61_then_visual_safe_salvage PROGRESS=0.72"
+elif test "$profile" = "best"; then
+  echo "SCENEPROOF_API_STAGE=s4_fix61_then_exhaustive_support PROGRESS=0.72"
 else
   echo "SCENEPROOF_API_STAGE=s4_fix61_incumbent PROGRESS=0.72"
 fi
@@ -233,9 +235,12 @@ fix114_end="$(now_ns)"
 # Frozen public profiles:
 #   fast   = certified Fix61, rendered without any further pose mutation;
 #   medium = certified Fix61 followed directly by conservative Fix140
-#            runnerfix1 support routing.  Fix114 is deliberately not online.
+#            runnerfix1 support routing.  Fix114 is deliberately not online;
+#   best   = one Fix61 incumbent followed by an exhaustive support audit.
 if test "$profile" = "medium"; then
   final_version="v5_sceneproof_medium_visual_safe_api"
+elif test "$profile" = "best"; then
+  final_version="v5_sceneproof_best_exhaustive_support_api"
 else
   final_version="v5_sceneproof_fast_fix61_api"
 fi
@@ -258,6 +263,8 @@ mkdir -p "$final_s4" "$(dirname "$sparse_certificate")"
 render_start="$(now_ns)"
 if test "$profile" = "medium"; then
   echo "SCENEPROOF_API_STAGE=s4_visual_safe_salvage_and_render PROGRESS=0.84"
+elif test "$profile" = "best"; then
+  echo "SCENEPROOF_API_STAGE=s4_exhaustive_support_and_render PROGRESS=0.84"
 else
   echo "SCENEPROOF_API_STAGE=s4_fix61_render PROGRESS=0.84"
 fi
@@ -268,12 +275,16 @@ for render_attempt in 1 2; do
   rm -f -- "$render" "$sparse_certificate"
   sparse_env=()
   if test "$profile" != "fast"; then
+    maximum_shift_m=0.5
+    if test "$profile" = "best"; then
+      maximum_shift_m="${SCENEPROOF_API_BEST_MAXIMUM_DROP_M:-3.0}"
+    fi
     sparse_env=(
       "IMAGINARIUM_SCENEPROOF_SPARSE_VERTICAL_CONTACT_AUDIT_OUTPUT=$sparse_certificate"
       "IMAGINARIUM_SCENEPROOF_SPARSE_VERTICAL_CONTACT_PLACEMENT_OUTPUT=$placement"
       "IMAGINARIUM_SCENEPROOF_SPARSE_ROLLBACK_PLACEMENT=$rollback_placement"
       "IMAGINARIUM_SCENEPROOF_SPARSE_CONTACT_TOLERANCE_M=0.02"
-      "IMAGINARIUM_SCENEPROOF_SPARSE_MAXIMUM_SHIFT_M=0.5"
+      "IMAGINARIUM_SCENEPROOF_SPARSE_MAXIMUM_SHIFT_M=$maximum_shift_m"
       "IMAGINARIUM_SCENEPROOF_SPARSE_MAXIMUM_TANGENT_SHIFT_M=0.15"
       "IMAGINARIUM_SCENEPROOF_SPARSE_MAXIMUM_PROGRAM_TANGENT_SHIFT_M=0.50"
       "IMAGINARIUM_SCENEPROOF_SPARSE_MINIMUM_HIT_FRACTION=0.10"
@@ -283,6 +294,10 @@ for render_attempt in 1 2; do
         "IMAGINARIUM_SCENEPROOF_VISUAL_SAFE_SALVAGE=1"
         "IMAGINARIUM_SCENEPROOF_VISUAL_SAFE_MAX_FLOOR_SHIFT_M=0.60"
         "IMAGINARIUM_SCENEPROOF_VISUAL_SAFE_MAX_SUPPRESSED=4"
+      )
+    elif test "$profile" = "best"; then
+      sparse_env+=(
+        "IMAGINARIUM_SCENEPROOF_SPARSE_AUDIT_ALL_OBJECTS=1"
       )
     fi
   fi
@@ -376,6 +391,7 @@ visual_safe = sparse.get("visual_safe_salvage", {})
 strength = {
     "fast": "frozen_fix61",
     "medium": "presentation_only_visual_salvage",
+    "best": "exhaustive_support_routed_geometry",
 }.get(profile, "unknown")
 record = {
     "job_id": job_id,

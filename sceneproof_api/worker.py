@@ -30,8 +30,8 @@ def requires_cold_rerun(job: dict) -> bool:
 
 
 def trial_seed(job: dict) -> int:
-    """Return a stable, distinct seed for this concrete job/trial."""
-    material = f"{job['job_id']}:{job.get('trial_index', 'single')}"
+    """Return a stable seed for this concrete job (including cold reruns)."""
+    material = job["job_id"]
     digest = hashlib.sha256(material.encode("ascii")).digest()
     return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
 
@@ -129,8 +129,6 @@ class Worker:
                 process_env["PYTHONHASHSEED"] = str(seed)
                 if requires_cold_rerun(job):
                     process_env["SCENEPROOF_API_FORCE_COLD_RERUN"] = "1"
-                if job.get("parent_job_id") and job.get("trial_index") is not None:
-                    process_env["SCENEPROOF_API_BEST_TRIAL"] = "1"
                 with log_path.open("wb") as log:
                     process = subprocess.Popen(
                         command,

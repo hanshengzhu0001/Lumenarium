@@ -1,6 +1,6 @@
 {
-  "release_id": "sceneproof-fast-medium-release143-2026-08-15",
-  "frozen_on": "2026-08-15",
+  "release_id": "lumenarium-v5-best-support-release152-2026-08-18",
+  "frozen_on": "2026-08-18",
   "profiles": {
     "fast": {
       "incumbent": "Fix61",
@@ -14,6 +14,13 @@
       "version": "v5_sceneproof_medium_visual_safe_api",
       "eligible_for_paper_metrics": false,
       "validated_smoke_job": "98323a903c2a41e282d6f0243a9bfb6d"
+    },
+    "best": {
+      "incumbent": "Fix61",
+      "final_layer": "exhaustive true-surface support audit with tangent repair and transactional Z-only first-contact drop",
+      "version": "v5_sceneproof_best_exhaustive_support_api",
+      "eligible_for_paper_metrics": false,
+      "validation_status": "local checks passed; A10 smoke required"
     }
   },
   "pipeline": [
@@ -23,6 +30,7 @@
     "S3 pose",
     "S4 SceneLM Fix61",
     "optional presentation-only visual-safe cleanup for medium",
+    "optional exhaustive true-surface support repair for best",
     "locked source-S3-camera render"
   ],
   "cache_policy": "Byte-identical inputs reuse frozen S0-S3/Fix61. Optional reruns create isolated final-stage jobs and artifacts.",

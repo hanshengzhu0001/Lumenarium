@@ -1,3 +1,3 @@
 """SceneProof frozen-pipeline API service."""
 
-RELEASE_ID = "sceneproof-seeded-cold-release150-2026-08-17"
+RELEASE_ID = "lumenarium-v5-best-support-release152-2026-08-18"

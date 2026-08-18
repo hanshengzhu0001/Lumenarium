@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 620" role="img" aria-labelledby="title desc">
+  <title id="title">Lumenarium workflow</title>
+  <desc id="desc">A single image flows through geometry, multimodal parsing, DeepSearch retrieval, pose recovery, SceneLM optimization, and SceneProof certification.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#071426"/><stop offset="1" stop-color="#102d42"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#56e6bf"/><stop offset="1" stop-color="#69a7ff"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-opacity=".22"/></filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#7895ad"/></marker>
+    <style>
+      .h{font:700 28px Inter,Arial,sans-serif;fill:#f6fbff}.k{font:700 18px Inter,Arial,sans-serif;fill:#56e6bf}.t{font:500 16px Inter,Arial,sans-serif;fill:#aec1d2}.s{font:600 14px Inter,Arial,sans-serif;fill:#d8e5ef}.box{fill:#10283b;stroke:#31536b;stroke-width:2}.proof{fill:#123a39;stroke:#56e6bf;stroke-width:2}.flow{stroke:#7895ad;stroke-width:4;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="620" rx="34" fill="url(#bg)"/>
+  <text x="72" y="70" class="h">From one image to an editable, proof-carrying 3D scene</text>
+  <text x="72" y="104" class="t">Built on Imaginarium · redesigned retrieval, optimization, physical verification, and deployment</text>
+  <g filter="url(#shadow)">
+    <rect x="68" y="174" width="190" height="242" rx="24" class="box"/>
+    <text x="92" y="215" class="k">INPUT</text><text x="92" y="262" class="h">Single image</text>
+    <text x="92" y="304" class="t">Any-size PNG/JPEG</text><text x="92" y="333" class="t">Aspect-preserving pad</text>
+    <rect x="92" y="362" width="142" height="10" rx="5" fill="url(#accent)"/>
+    <rect x="302" y="152" width="208" height="286" rx="24" class="box"/>
+    <text x="326" y="193" class="k">S0–S1</text><text x="326" y="237" class="h">Understand</text>
+    <text x="326" y="277" class="t">Depth + geometry</text><text x="326" y="306" class="t">SAM3 parsing</text><text x="326" y="335" class="t">Scene graph + semantics</text>
+    <text x="326" y="391" class="s">Multimodal perception</text>
+    <rect x="554" y="152" width="208" height="286" rx="24" class="box"/>
+    <text x="578" y="193" class="k">S2–S3</text><text x="578" y="237" class="h">Recover</text>
+    <text x="578" y="277" class="t">DeepSearch assets</text><text x="578" y="306" class="t">DINOv2 matching</text><text x="578" y="335" class="t">Pose + support tree</text>
+    <text x="578" y="391" class="s">Fast asset-complete layout</text>
+    <rect x="806" y="152" width="244" height="286" rx="24" class="box"/>
+    <text x="830" y="193" class="k">S4 · SCENELM</text><text x="830" y="237" class="h">Optimize</text>
+    <text x="830" y="277" class="t">Relation Programs</text><text x="830" y="306" class="t">Scoped 400-step search</text><text x="830" y="335" class="t">Schur elimination</text>
+    <text x="830" y="391" class="s">3.51× faster S4</text>
+    <rect x="1094" y="136" width="270" height="318" rx="24" class="proof"/>
+    <text x="1118" y="178" class="k">SCENEPROOF</text><text x="1118" y="222" class="h">Verify &amp; commit</text>
+    <text x="1118" y="264" class="t">Mesh collision witness</text><text x="1118" y="293" class="t">Support + COM witness</text><text x="1118" y="322" class="t">Family non-regression</text><text x="1118" y="351" class="t">Restore or unresolved</text>
+    <text x="1118" y="407" class="s">+7.52 pp physical macro</text>
+    <rect x="1408" y="174" width="128" height="242" rx="24" class="box"/>
+    <text x="1431" y="215" class="k">OUTPUT</text><text x="1431" y="258" class="h">3D</text>
+    <text x="1431" y="294" class="t">Edit</text><text x="1431" y="322" class="t">Render</text><text x="1431" y="350" class="t">Audit</text><text x="1431" y="378" class="t">Export</text>
+  </g>
+  <path d="M258 295H292" class="flow"/><path d="M510 295H544" class="flow"/><path d="M762 295H796" class="flow"/><path d="M1050 295H1084" class="flow"/><path d="M1364 295H1398" class="flow"/>
+  <rect x="302" y="494" width="1062" height="64" rx="18" fill="#0d2132" stroke="#29465d"/>
+  <text x="330" y="522" class="s">Imaginarium foundation</text><text x="330" y="546" class="t">vision-guided reconstruction · asset library · scene-layout representation</text>
+  <text x="985" y="535" class="s">Lumenarium extensions ↑</text>
+</svg>

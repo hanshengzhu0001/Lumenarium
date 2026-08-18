@@ -1368,6 +1368,7 @@ def apply_sceneproof_sparse_vertical_contact(
     minimum_hit_fraction=0.10,
     maximum_tangent_shift_m=0.15,
     maximum_program_tangent_shift_m=0.50,
+    audit_all_objects=False,
 ):
     """Repair obvious support gaps/penetrations with sparse true-geometry rays.
 
@@ -1414,9 +1415,15 @@ def apply_sceneproof_sparse_vertical_contact(
     for object_id, row in obj_info.items():
         if object_id == "scene_camera" or not isinstance(row, dict):
             continue
-        parent_id = row.get("supported")
-        if not isinstance(parent_id, str) or row.get("SpatialRel") == "inside":
+        if re.match(r"^(floor|wall|ceiling)_\d+$", object_id):
             continue
+        parent_id = row.get("supported")
+        if row.get("SpatialRel") == "inside":
+            continue
+        if not isinstance(parent_id, str):
+            if not audit_all_objects:
+                continue
+            parent_id = None
         try:
             candidate_root = roots.get(object_id)
             if candidate_root is None:
@@ -1442,7 +1449,10 @@ def apply_sceneproof_sparse_vertical_contact(
             "mutates_so3": False,
             "mutates_scale": False,
         }
-        structural = re.match(r"^(wall|ceiling)_\d+$", parent_id)
+        structural = (
+            isinstance(parent_id, str)
+            and re.match(r"^(wall|ceiling)_\d+$", parent_id)
+        )
         if structural:
             against_wall = row.get("againstWall")
             if isinstance(against_wall, str):
@@ -1467,7 +1477,149 @@ def apply_sceneproof_sparse_vertical_contact(
                 unresolved.append(object_id)
             records.append(record)
             continue
-        if root is None or parent is None:
+        if root is None:
+            record["reason"] = "missing_reconstructed_child_or_parent"
+            unresolved.append(object_id)
+            records.append(record)
+            continue
+
+        # Exhaustive V5-best mode also audits ordinary reconstructed objects
+        # with no declared gravity parent. Explicit plane attachments are never
+        # dropped. All other objects search for the highest real upward surface
+        # directly below their current footprint and preserve XY/SO(3)/scale.
+        if parent_id is None:
+            child_plane_ids = sorted(
+                plane_id for candidate_id, plane_id in plane_pairs
+                if candidate_id == object_id
+            )
+            if child_plane_ids:
+                record.update(
+                    reason="structural_attachment_witness_incomplete",
+                    plane_attach_program_ids=child_plane_ids,
+                )
+                unresolved.append(object_id)
+                records.append(record)
+                continue
+            try:
+                child_min, child_max = _sceneproof_world_hierarchy_bounds(root)
+                bounds_cache[object_id] = (child_min, child_max)
+            except (TypeError, ValueError, RuntimeError) as error:
+                record.update(reason="reconstructed_geometry_unavailable", error=str(error))
+                unresolved.append(object_id)
+                records.append(record)
+                continue
+            x0, y0 = child_min[:2]
+            x1, y1 = child_max[:2]
+            xs = np.linspace(x0, x1, 5)[1:-1]
+            ys = np.linspace(y0, y1, 5)[1:-1]
+            sample_xy = [(float(x), float(y)) for x in xs for y in ys]
+            sample_xy.append((float((x0 + x1) / 2), float((y0 + y1) / 2)))
+            origin_z = float(child_min[2] + contact_tolerance_m)
+            distance = float(maximum_shift_m + 2.0 * contact_tolerance_m)
+            surface_candidates = []
+            for supporter_id, supporter_root in roots.items():
+                if (
+                    supporter_id == object_id
+                    or supporter_root is None
+                    or re.match(r"^(wall|ceiling)_\d+$", supporter_id)
+                ):
+                    continue
+                supporter_tree = bvh_cache.get(supporter_id)
+                if supporter_tree is None:
+                    try:
+                        supporter_tree = _sceneproof_evaluated_bvh(supporter_root)
+                        bvh_cache[supporter_id] = supporter_tree
+                    except (TypeError, ValueError, RuntimeError):
+                        continue
+                hits = []
+                for x, y in sample_xy:
+                    location, normal, _, _ = supporter_tree.ray_cast(
+                        Vector((x, y, origin_z)),
+                        Vector((0.0, 0.0, -1.0)),
+                        distance,
+                    )
+                    if location is None or normal is None or float(normal.z) < 0.5:
+                        continue
+                    hits.append(float(location.z))
+                fraction = len(hits) / len(sample_xy)
+                if not hits or fraction < minimum_hit_fraction:
+                    continue
+                support_z = max(hits)
+                gap = float(child_min[2] - support_z)
+                if -contact_tolerance_m <= gap <= maximum_shift_m:
+                    surface_candidates.append(
+                        (support_z, supporter_id, gap, fraction)
+                    )
+            surface_candidates.sort(key=lambda item: (-item[0], item[1]))
+            if not surface_candidates:
+                record["reason"] = "no_true_surface_below_current_footprint"
+                unresolved.append(object_id)
+                records.append(record)
+                continue
+            support_z, supporter_id, gap_before, hit_fraction = surface_candidates[0]
+            record.update(
+                actual_supporter_id=supporter_id,
+                sparse_ray_count=len(sample_xy),
+                sparse_hit_fraction=float(hit_fraction),
+                contact_gap_before_m=float(gap_before),
+            )
+            if abs(gap_before) <= contact_tolerance_m:
+                record.update(
+                    status="held",
+                    reason="discovered_true_surface_contact_within_tolerance",
+                    z_shift_m=0.0,
+                )
+                held.append(object_id)
+                records.append(record)
+                continue
+            before_matrix = root.matrix_world.copy()
+            before_overlaps = set(
+                _sceneproof_sparse_aabb_overlaps(object_id, roots, bounds_cache)
+            ) - {supporter_id}
+            root.matrix_world[2][3] = float(root.matrix_world[2][3] - gap_before)
+            bpy.context.view_layer.update()
+            bounds_cache.pop(object_id, None)
+            after_min, _ = _sceneproof_world_hierarchy_bounds(root)
+            after_overlaps = set(
+                _sceneproof_sparse_aabb_overlaps(object_id, roots, bounds_cache)
+            ) - {supporter_id}
+            new_overlaps = sorted(after_overlaps - before_overlaps)
+            gap_after = float(after_min[2] - support_z)
+            if new_overlaps or abs(gap_after) > contact_tolerance_m + 1e-5:
+                root.matrix_world = before_matrix
+                bpy.context.view_layer.update()
+                bounds_cache.pop(object_id, None)
+                record.update(
+                    reason="exhaustive_vertical_drop_postcheck_failed",
+                    rollback_restored=True,
+                    z_shift_m=float(-gap_before),
+                    contact_gap_after_m=gap_after,
+                    new_world_aabb_overlaps=new_overlaps,
+                )
+                unresolved.append(object_id)
+                records.append(record)
+                continue
+            row["pose_matrix_for_blender"] = [
+                list(matrix_row) for matrix_row in root.matrix_world
+            ]
+            row["supported"] = supporter_id
+            row["SpatialRel"] = "on"
+            record.update(
+                status="repaired",
+                reason="certified_exhaustive_vertical_first_contact_drop",
+                z_shift_m=float(-gap_before),
+                vertical_drop_m=float(gap_before),
+                contact_gap_after_m=gap_after,
+                new_world_aabb_overlaps=[],
+            )
+            repaired.append(object_id)
+            bounds_cache.clear()
+            bvh_cache.clear()
+            support_component_cache.clear()
+            records.append(record)
+            continue
+
+        if parent is None:
             record["reason"] = "missing_reconstructed_child_or_parent"
             unresolved.append(object_id)
             records.append(record)
@@ -1881,8 +2033,15 @@ def apply_sceneproof_sparse_vertical_contact(
 
     return {
         "schema_version": "sceneproof_support_contact_routing_v3",
-        "policy": "dominant_true_mesh_component_then_tangent_then_vertical_first_contact",
-        "certificate_strength": "support_routed_sparse_geometry",
+        "policy": (
+            "exhaustive_true_surface_support_then_transactional_first_contact"
+            if audit_all_objects else
+            "dominant_true_mesh_component_then_tangent_then_vertical_first_contact"
+        ),
+        "certificate_strength": (
+            "exhaustive_support_routed_geometry"
+            if audit_all_objects else "support_routed_sparse_geometry"
+        ),
         "passed": not unresolved,
         "status": "sparse_geometry_certified" if not unresolved else "unresolved",
         "repaired_object_ids": repaired,
@@ -1897,6 +2056,7 @@ def apply_sceneproof_sparse_vertical_contact(
             "maximum_program_tangent_shift_m": float(
                 maximum_program_tangent_shift_m
             ),
+            "audit_all_objects": bool(audit_all_objects),
         },
     }
 
@@ -9160,6 +9320,9 @@ def layout(
                         "0.50",
                     )
                 ),
+                audit_all_objects=os.environ.get(
+                    "IMAGINARIUM_SCENEPROOF_SPARSE_AUDIT_ALL_OBJECTS", "0"
+                ).strip().lower() in {"1", "true", "yes", "on"},
             )
             if os.environ.get(
                 "IMAGINARIUM_SCENEPROOF_VISUAL_SAFE_SALVAGE", "0"

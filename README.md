@@ -1,9 +1,9 @@
 # Lumenarium
 
 > **已部署服务 / Hosted service:** [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/)<br>
-> 上传一张 1024×1024 室内图片，即可获得可编辑布局、最终渲染、质量证书和完整结果包。
+> 上传任意尺寸的室内 PNG/JPEG（服务会保持比例并补边到 1024×1024），即可获得可编辑布局、最终渲染、质量证书和完整结果包。
 
-[中文说明](#中文说明) · [直接使用](#直接使用已部署的-lumenarium) · [从零部署](#从零部署-lumenarium) · [English guide](#english-guide)
+[Project page](https://hanshengzhu0001.github.io/Lumenarium/) · [GitHub](https://github.com/hanshengzhu0001/Lumenarium) · [中文说明](#中文说明) · [直接使用](#直接使用已部署的-lumenarium) · [从零部署](#从零部署-lumenarium) · [English guide](#english-guide)
 
 # 中文说明
 
@@ -35,6 +35,34 @@ Lumenarium 建立在开源项目
   </tr>
 </table>
 
+## 跨版本视觉对比
+
+每行从左到右依次为 **输入图、Imaginarium V1、Lumenarium V3、Lumenarium V5**。
+V3 是加入结构化支撑推理后的中间版本；V5 统一表示当前 Fast、Medium、Best 产品线，
+其中下图采用最终可视化结果。两组例子都来自相同输入，不是人工重排。
+
+<table>
+  <tr>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_input.png" alt="Living room input"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v1.png" alt="Living room Imaginarium V1"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v3.png" alt="Living room Lumenarium V3"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v5.png" alt="Living room Lumenarium V5"></td>
+  </tr>
+  <tr><td align="center"><b>Input</b></td><td align="center"><b>V1 · Imaginarium</b></td><td align="center"><b>V3 · Support-aware</b></td><td align="center"><b>V5 · Lumenarium</b></td></tr>
+  <tr>
+    <td width="25%"><img src="docs/assets/comparison_office_input.png" alt="Office input"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v1.png" alt="Office Imaginarium V1"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v3.png" alt="Office Lumenarium V3"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v5.png" alt="Office Lumenarium V5"></td>
+  </tr>
+  <tr><td align="center"><b>Input</b></td><td align="center"><b>V1 · Imaginarium</b></td><td align="center"><b>V3 · Support-aware</b></td><td align="center"><b>V5 · Lumenarium</b></td></tr>
+</table>
+
+这些图展示的是系统级 trade-off：V5 优先保证**资产完整性、生成速度、低穿模和物体间关系**；
+DeepSearch 缩短检索链路并扩大资产覆盖，但单体资产的精确 rotation/translation 可能低于 V1/V3。
+在光子技术美术应用中，我们把整体场景可用性放在单体 pose 误差与少量非关键悬空之前；
+论文评测仍明确保留这项限制，不把视觉改善误报为 pose 提升。
+
 ## 主要结果
 
 Paper30 只统计可见实例掩码面积不少于 8,000 像素的 Primary 物体。
@@ -54,6 +82,17 @@ visual-safe 清理；它可能移动明显悬空的物体，或从最终渲染�
 重复叶子物体，因此仅用于展示，不计入论文定量主表。
 
 ## 全链路速度
+
+| 版本 | 端到端平均时间/场景 | S4 时间/场景 | 相对 V1 端到端 | 口径 |
+|---|---:|---:|---:|---|
+| Imaginarium V1 | ≈23.8 min | 677.770 s | 1.00× | 由历史完整运行恢复的近似值 |
+| V4 DeepSearch | ≈21.9 min | 677.770 s | ≈1.09× | S0--S3 实测 + legacy S4 |
+| **Lumenarium V5-fast** | **13.83 min** | **192.930 s** | **≈1.72×** | Paper30 冷启动实测 |
+
+V4 的主要收益来自 DeepSearch 缩短资产检索；V5 的结构性加速来自 SceneLM：它不再对整间房执行
+5,000 步模拟退火，而是把 support、collision、plane 和 semantic 关系编译为 Relation Programs，
+只更新违反约束的对象与自由度，并通过精确 leaf-translation Schur elimination 消去安全的局部变量。
+因此 S4 从 677.770 秒降至 192.930 秒，即 **3.513×**。
 
 | 阶段 | 平均秒/场景 | Paper30 有效 GPU 小时 | 说明 |
 |---|---:|---:|---|
@@ -80,6 +119,11 @@ Legacy SA-5000 S4 为 677.770 秒/场景。最终 256 samples 的 Paper30 渲染
    SA-5000 主路径，并把每次修改包装成可审计事务：局部 gate、精确碰撞/支撑检查、
    aggregate non-regression 和 scoped rollback 共同决定是否提交。
 
+SceneProof 提升 physical macro 的原因不是“模型更敢移动”，而是**错误改动不能静默提交**：
+候选必须同时通过真实网格碰撞、支撑接触、COM/边界、关系一致性和 family-level non-regression；
+失败就恢复 incumbent，证据不足则显式标记 unresolved。V4 与 V5 的 recovery/parent 工作点完全相同，
+而 physical macro 从 54.58% 升至 62.10%，因此这 **+7.52 pp** 可归因于 S4 的定向优化与证明层。
+
 相对 Imaginarium，本仓库还加入 DeepSearch 检索、SAM3/低类别恢复、缺失结构 OBB
 回退、堆叠感知姿态序列化、true-mesh COM/contact/overhang 审计、独立对象 settle、
 visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/API 打包和
@@ -90,14 +134,14 @@ visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/AP
 > **不需要安装代码、Blender、模型或数据。** 技术美术和评审用户应优先使用网页；只有维护者、研究复现或私有部署才需要执行后面的安装流程。
 
 1. 打开 [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/)。
-2. 上传一张 1024x1024 PNG/JPEG；推荐使用完整室内视图，避免严重裁切和鱼眼畸变。
+2. 上传任意尺寸 PNG/JPEG；服务会保持宽高比并补边为 1024×1024。推荐使用完整室内视图，避免严重裁切和鱼眼畸变。
 3. 选择模式：
 
    | 模式 | 适合场景 | 行为 |
    |---|---|---|
    | **V5-fast** | 论文定量、快速预览 | 冻结 Fix61，不执行展示性删除 |
    | **V5-medium** | 演示、技术美术交付 | Fix61 + 保守 visual-safe 清理 |
-   | **V5-best** | 最终精选 | 3 次不同 seed 的 V5-fast 冷启动，再用无 GT selector 选最好结果 |
+   | **V5-best** | 最高物理完整性 | 单次 V5-fast + 全对象真实支撑审计与事务化 first-contact 掉落 |
 4. 点击 **Generate scene**。新图完整运行 S0--S4；字节完全相同的图片复用冻结的
    S0--S3/Fix61 缓存。切换模式时会从共享缓存继续，只运行对应的最终策略。
 5. 等待页面依次显示 S0、S1、S2、S3、S4 完成，然后下载结果 ZIP。
@@ -110,7 +154,7 @@ ZIP 中包含：
 
 ```text
 placement.json     可编辑的物体位姿与关系
-geometry.json      selector 与复核使用的冻结几何快照
+geometry.json      支撑审计与人工复核使用的冻结几何快照
 render.png         使用源 S3 相机渲染的最终图片
 evaluation.json    证书、修复、回滚与 unresolved 对象
 result.json        版本、模式、状态和各阶段耗时
@@ -120,14 +164,14 @@ sceneproof-result.zip
 `succeeded` 表示流水线与证书通过；`unresolved` 表示已生成结果，但仍有无法安全自动
 修复的可见关系；`failed` 才表示流水线执行失败。
 
-V5-best 的三次子任务会由两张 A10 并行领取：前两次同时运行，先空闲的 GPU 再执行
-第三次。三次结束后 selector 仅在 CPU 上读取 geometry、placement、Relation Program
-和证书，通常只需数秒到数十秒。它先比较证书是否通过和 unresolved 数，再比较严重
-碰撞、critical/macro physical、意外碰撞、共同 8000px+ 对象的 S1-mask pose
-reprojection IoU/F1 与 relation coverage，并用 trial index 做确定性平局裁决。重投影项
-同时对 translation 偏差和 rotation 造成的轮廓偏差敏感，但它不是 GT 的米制位移或
-SO(3) 误差。整个选择过程不读取 GT。按现有 V5-fast 冷启动速度估算，双 A10 墙钟约为两轮
-冷启动，即约 28 分钟，而有效 GPU 计算约为单次的 3 倍。
+V5-best 不再运行三次冷启动。它从同一个 Fix61 incumbent 出发，按支撑层级从低到高审计
+所有重建对象，包括缺少 declared parent 的普通物体。具有完整 wall/ceiling attachment
+证据的对象保持不动；其他对象先尝试不超过 0.15 m 的真实支撑面切向修正，否则在当前
+footprint 下寻找最高 true-mesh surface，并执行冻结 XY、SO(3) 与 scale 的 Z-only
+first-contact drop。每个对象都是独立事务：移动后若产生新碰撞或未形成真实接触，立即恢复
+Fix61 并标记 unresolved。默认最大掉落距离为 3.0 m，可通过
+`SCENEPROOF_API_BEST_MAXIMUM_DROP_M` 调整。该模式只需一次冷启动，但在完成 Paper30
+非劣验证前不计入论文定量主表。
 
 ## 从零部署 Lumenarium
 
@@ -310,11 +354,44 @@ manually assembled or ground-truth scene:
 See also the end-to-end
 [Bilibili demo](https://www.bilibili.com/video/BV1tpbD6hERB/).
 
+## Visual comparison across versions
+
+Each row shows **Input, Imaginarium V1, support-aware V3, and final Lumenarium V5** from left to right.
+V5 denotes the current Fast/Medium/Best family; the images below use its final visual output.
+
+<table>
+  <tr>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_input.png" alt="Living room input"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v1.png" alt="Living room Imaginarium V1"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v3.png" alt="Living room Lumenarium V3"></td>
+    <td width="25%"><img src="docs/assets/comparison_livingroom_v5.png" alt="Living room Lumenarium V5"></td>
+  </tr>
+  <tr><td align="center"><b>Input</b></td><td align="center"><b>V1 · Imaginarium</b></td><td align="center"><b>V3 · Support-aware</b></td><td align="center"><b>V5 · Lumenarium</b></td></tr>
+  <tr>
+    <td width="25%"><img src="docs/assets/comparison_office_input.png" alt="Office input"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v1.png" alt="Office Imaginarium V1"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v3.png" alt="Office Lumenarium V3"></td>
+    <td width="25%"><img src="docs/assets/comparison_office_v5.png" alt="Office Lumenarium V5"></td>
+  </tr>
+  <tr><td align="center"><b>Input</b></td><td align="center"><b>V1 · Imaginarium</b></td><td align="center"><b>V3 · Support-aware</b></td><td align="center"><b>V5 · Lumenarium</b></td></tr>
+</table>
+
+The comparison reflects an explicit product trade-off. Lumenarium prioritizes **asset completeness,
+runtime, low interpenetration, and inter-object physical relationships**. DeepSearch accelerates retrieval
+and broadens asset coverage, but exact per-object rotation and translation can be weaker than V1/V3.
+This limitation is reported rather than hidden.
+
 V5-fast is the quantitative system used for paper metrics. V5-medium starts
 from the same Fix61 result and conservatively repairs visible support failures;
 when no safe placement exists, it may suppress at most four unresolved leaf
 duplicates from the final render. Medium is intended for presentation and is
 reported separately from the main quantitative table.
+
+V5-best is no longer a three-cold-start selector. It runs V5-fast once, then
+audits every potentially unsupported reconstructed object against true
+surfaces and commits only bounded, collision-nonregressing support repairs.
+It is the completeness-oriented service profile; Paper30 reporting remains
+pending until its aggregate non-regression run is complete.
 
 ## Main results
 
@@ -334,6 +411,18 @@ V5-fast keeps the V4 DeepSearch recovery and parent operating point while
 improving physical macro by **7.52 percentage points**.
 
 ### Full-chain speed
+
+| Version | End-to-end mean / scene | S4 / scene | End-to-end vs. V1 | Status |
+|---|---:|---:|---:|---|
+| Imaginarium V1 | ≈23.8 min | 677.770 s | 1.00× | reconstructed historical estimate |
+| V4 DeepSearch | ≈21.9 min | 677.770 s | ≈1.09× | measured S0--S3 + legacy S4 |
+| **Lumenarium V5-fast** | **13.83 min** | **192.930 s** | **≈1.72×** | measured Paper30 cold run |
+
+DeepSearch provides the V4 retrieval gain. SceneLM provides the larger V5 optimization gain: instead of
+running 5,000 simulated-annealing steps over the whole room, it compiles support, collision, plane, and
+semantic constraints into Relation Programs, updates only implicated objects and degrees of freedom, and
+uses exact leaf-translation Schur elimination where safe. This reduces S4 from 677.770 s to 192.930 s,
+or **3.513×**.
 
 The cold benchmark contains all stages from image input through the final S4
 placement. Final 256-sample rendering is reported separately.
@@ -394,6 +483,12 @@ language-model-guided relational optimizer and a proof-carrying commit layer:
 The result is a **3.513x S4 speedup** over legacy SA-5000 and a physical macro
 increase from 54.58% at V4 DeepSearch to 62.10% at V5-fast.
 
+The physical gain comes from preventing unsafe proposals from silently entering
+the scene. V4 and V5 have the same recovery/parent operating point, while physical
+macro rises by **7.52 pp**; the improvement is therefore attributable to
+relation-scoped S4 optimization plus certified commit/restore decisions rather
+than additional upstream object recovery.
+
 ## Changes relative to Imaginarium
 
 | Stage or subsystem | Lumenarium change | Why it matters |
@@ -408,8 +503,9 @@ increase from 54.58% at V4 DeepSearch to 62.10% at V5-fast.
 | SceneProof | factor IR, certificates, guarded local commits and scoped rollback | prevents an optimization gain from silently causing another regression |
 | Physical reasoning | true-mesh COM, contact, overhang, first-contact and support-component audits | distinguishes genuine instability from OBB proxy disagreement |
 | V5-medium | bounded visual-safe support recovery and duplicate suppression | removes conspicuous unsupported clutter without weakening paper claims |
+| V5-best | one Fix61 run plus exhaustive true-surface support repair | audits every potentially unsupported object without tripling cold-start cost |
 | Evaluation | 8000px+ Primary protocol, common physical evaluator and provenance dashboard | keeps quality numbers comparable and traceable |
-| Productization | Fast/Medium API, two-A10 workers, frozen-cache reuse, retries and web UI | turns the research pipeline into a usable technical-art service |
+| Productization | Fast/Medium/Best API, two-A10 workers, frozen-cache reuse, retries and web UI | turns the research pipeline into a usable technical-art service |
 
 ## Pipeline
 
@@ -422,6 +518,7 @@ image
   -> S4 SceneLM optimization
   -> Fix61 SceneProof certificate and rollback
   -> optional V5-medium visual-safe cleanup
+  -> optional V5-best exhaustive true-surface support repair
   -> placement.json + render.png + evaluation.json + result bundle
 ```
 
@@ -613,12 +710,14 @@ and render.
 ## Use the hosted service
 
 1. Open [https://embedding.lightart.qq.com/](https://embedding.lightart.qq.com/).
-2. Upload a 1024x1024 PNG/JPEG. A complete indoor view with limited cropping
-   and lens distortion works best.
+2. Upload a PNG/JPEG of any size. Lumenarium preserves its aspect ratio and
+   pads it to 1024x1024 automatically. A complete indoor view with limited
+   cropping and lens distortion works best.
 3. Choose **V5-fast** for the frozen, paper-eligible Fix61 path, or
    **V5-medium** for Fix61 plus presentation-oriented visual-safe cleanup.
-   Choose **V5-best** to run three independent V5-fast cold starts and select
-   the strongest result with a GT-free SceneProof high selector.
+   Choose **V5-best** for one V5-fast run followed by an exhaustive true-surface
+   support audit and transactional first-contact repair over all reconstructed
+   objects.
 4. Click **Generate scene**. A new image runs the complete S0--S4 pipeline.
    A byte-identical image reuses the frozen S0--S3/Fix61 cache; switching
    profiles resumes from that shared cache and runs only the selected final
@@ -634,7 +733,7 @@ expect roughly 10--15 minutes per scene.
 
 ```text
 placement.json     structured object poses and relations
-geometry.json      frozen geometry snapshot used by selection and audits
+geometry.json      frozen geometry snapshot used by support audits and review
 render.png         source-camera final render
 evaluation.json    certificate, repaired and unresolved objects
 result.json        profile, release and timing summary
@@ -645,18 +744,18 @@ sceneproof-result.zip
 means that a result was produced but at least one visible relation could not
 be repaired safely. Only `failed` indicates pipeline execution failure.
 
-For V5-best, the two A10 workers execute the first two trials concurrently;
-the first free worker then executes the third. Selection is CPU-only and
-normally takes seconds to tens of seconds after all trials finish. The fixed
-ranking uses certificate pass, unresolved count, severe collisions, critical
-and macro physical realizability, unintended collisions, S1-mask pose
-reprojection IoU/F1 over common 8000px+ objects, and relation coverage, with
-trial index as the deterministic final tie-breaker. Reprojection is sensitive
-to translation and rotation-induced silhouette errors, but it is not a metric
-translation or SO(3) GT error. The selector never reads GT.
-At the measured V5-fast rate, expect roughly two cold-start rounds, or about
-28 minutes of two-A10 wall time and three times the useful GPU compute of one
-V5-fast run.
+V5-best no longer performs three cold starts. It starts from the same Fix61
+incumbent and audits every reconstructed object from lower to higher support
+levels, including ordinary objects without a declared parent. Complete
+wall/ceiling attachments are held. Other objects first receive a true-surface
+tangent correction of at most 0.15 m; otherwise the system searches below the
+current footprint for the highest upward true-mesh surface and applies a
+Z-only first-contact drop with XY, SO(3), and scale frozen. Each object is a
+transaction: a new overlap or failed contact restores Fix61 and records the
+object as unresolved. The default maximum drop is 3.0 m and can be changed with
+`SCENEPROOF_API_BEST_MAXIMUM_DROP_M`. This costs one cold start plus the
+exhaustive support pass, but remains outside the paper headline table until a
+Paper30 non-regression run is complete.
 
 ## Deploy on the two-A10 host
 

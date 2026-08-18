@@ -10,7 +10,7 @@ divergent install procedure here.
 |---|---|---|
 | `fast` | frozen SceneLM/Fix61 | eligible |
 | `medium` | Fix61 plus bounded visual-safe cleanup | presentation only |
-| `best` | three independently seeded cold `fast` trials plus GT-free selection | selector report required |
+| `best` | one V5-fast run plus exhaustive true-surface support audit and transactional first-contact repair | validation required before paper reporting |
 
 ## Start or restart
 
@@ -43,4 +43,5 @@ worker token authenticates workers only and must never be exposed to browsers.
 Every completed job packages `placement.json`, `geometry.json`, `render.png`,
 `evaluation.json`, `result.json` and `sceneproof-result.zip`. New inputs execute
 S0--S4. Byte-identical inputs may reuse the frozen S0--S3/Fix61 cache; the UI's
-seeded cold-rerun control explicitly bypasses it.
+cold-rerun control explicitly bypasses it. `best` is a single run: it does not
+spawn three child cold starts or perform GT-free trial selection.

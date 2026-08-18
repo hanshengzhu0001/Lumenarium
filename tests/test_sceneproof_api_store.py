@@ -82,23 +82,16 @@ class SceneProofJobStoreTest(unittest.TestCase):
         }))
         self.assertFalse(requires_cold_rerun({"idempotency_key": None}))
 
-    def test_best_parent_waits_while_children_are_claimable(self):
-        parent, _ = self.store.create(
+    def test_best_is_one_directly_claimable_job(self):
+        best, _ = self.store.create(
             release_id="r1", input_path="in", artifact_dir="best",
-            idempotency_key="best", profile="best", initial_state="waiting",
+            idempotency_key="best", profile="best", initial_state="queued",
         )
-        for trial_index in range(3):
-            self.store.create(
-                release_id="r1", input_path="in",
-                artifact_dir=f"trial-{trial_index}",
-                idempotency_key=f"trial-{trial_index}", profile="fast",
-                parent_job_id=parent["job_id"], trial_index=trial_index,
-            )
-        children = self.store.children(parent["job_id"])
-        self.assertEqual([0, 1, 2], [row["trial_index"] for row in children])
+        self.assertEqual([], self.store.children(best["job_id"]))
         claimed = self.store.claim(worker_id="host-a:gpu0", lease_seconds=60)
-        self.assertEqual(0, claimed["trial_index"])
-        self.assertNotEqual(parent["job_id"], claimed["job_id"])
+        self.assertEqual(best["job_id"], claimed["job_id"])
+        self.assertEqual("best", claimed["profile"])
+        self.assertIsNone(claimed["trial_index"])
 
     def test_pose_proxy_uses_only_source_8000px_equivalent_objects(self):
         proxy = pose_reprojection_proxy({

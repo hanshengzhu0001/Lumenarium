@@ -16,14 +16,14 @@
 </head>
 <body><main>
   <h1>Lumenarium</h1>
-  <p><strong>Single-image to structured 3D scene.</strong> Upload a 1024 x 1024 PNG/JPEG. New images run the complete S0-S4 pipeline.</p>
+  <p><strong>Single-image to structured 3D scene.</strong> Upload any-size PNG/JPEG; Lumenarium preserves its aspect ratio and pads it to 1024 x 1024 automatically. New images run the complete S0-S4 pipeline.</p>
   <h2>Generate a scene</h2>
   <form id="form">
     <input name="image" type="file" accept="image/png,image/jpeg" required><br>
     <select name="profile">
       <option value="fast">V5-fast — frozen Fix61</option>
       <option value="medium" selected>V5-medium — Fix61 + visual-safe cleanup</option>
-      <option value="best">V5-best — three cold V5-fast trials + GT-free selector</option>
+      <option value="best">V5-best — Fix61 + exhaustive support repair</option>
     </select><br>
     <small>Identical images reuse the same frozen S0-S3 and Fix61 cache across profiles.</small><br>
     <label><input name="force_rerun" type="checkbox" value="true"> Re-run only the selected final profile (reuse frozen S0-S3/Fix61)</label><br>
@@ -41,15 +41,15 @@
     function paintStages(name,progress){const active=stageGroup(name),order=stageDefs.map(x=>x[0]),index=order.indexOf(active);stageDefs.forEach(([id])=>{const node=document.querySelector('#stage-'+id);node.className='stage'+(index>=0&&order.indexOf(id)<index?' done':id===active?' active':'')});if(name==='frozen_fix61_cache_hit'){['s0','s1','s2','s3'].forEach(id=>document.querySelector('#stage-'+id).className='stage done')}bar.value=Math.round(100*progress)}
     form.onsubmit=async event=>{event.preventDefault();output.innerHTML='';status.className='';
       const profile=form.querySelector('[name=profile]').value;
-      if(profile==='best'&&!confirm('Run three independent cold V5-fast trials and select the best? Two A10 workers need about two cold-start rounds.'))return;
-      if(profile!=='best'&&document.querySelector('#force-cold-rerun').checked&&!confirm('Run a completely new S0-S4 cold start? This ignores the frozen cache and can take 10-15 minutes per scene.'))return;
+      if(profile==='best'&&!confirm('Audit every reconstructed object for a real support witness, then apply bounded transactional first-contact drops where safe?'))return;
+      if(document.querySelector('#force-cold-rerun').checked&&!confirm('Run a completely new S0-S4 cold start? This ignores the frozen cache and can take 10-15 minutes per scene.'))return;
       const response=await fetch('/v1/jobs',{method:'POST',body:new FormData(form)}),body=await response.json();
       if(!response.ok){status.className='bad';status.textContent=JSON.stringify(body);return}
       const id=body.job.job_id;bar.value=0;paintStages('queued',0);status.textContent='Queued '+id;
       const timer=setInterval(async()=>{const job=await(await fetch('/v1/jobs/'+id)).json();paintStages(job.stage,job.progress);status.textContent=`${job.stage} — ${Math.round(100*job.progress)}%`;
         if(job.state==='succeeded'){clearInterval(timer);const result=job.result||{},quality=result.status||'unresolved',unresolved=result.unresolved_object_ids||[];
           status.className=['sparse_geometry_certified','certified'].includes(quality)?'ok':'warn';
-          status.textContent=result.profile==='best'?'V5-best selected from three GT-free cold trials':(quality==='visual_salvaged'?'Visual-safe render completed (presentation only)':(['sparse_geometry_certified','certified'].includes(quality)?'Support contact certified':`Completed with unresolved objects: ${unresolved.join(', ')||'see evaluation.json'}`));
+          status.textContent=result.profile==='best'?(quality==='sparse_geometry_certified'?'V5-best exhaustive support repair certified':`V5-best completed with unresolved objects: ${unresolved.join(', ')||'see evaluation.json'}`):(quality==='visual_salvaged'?'Visual-safe render completed (presentation only)':(['sparse_geometry_certified','certified'].includes(quality)?'Support contact certified':`Completed with unresolved objects: ${unresolved.join(', ')||'see evaluation.json'}`));
           output.innerHTML=`<img src="/v1/jobs/${id}/artifacts/render.png"><p><a href="/v1/jobs/${id}/artifacts/sceneproof-result.zip">Download result package</a></p>`}
         else if(['failed','cancelled'].includes(job.state)){clearInterval(timer);status.className='bad';status.textContent='Pipeline failed: '+(job.error||'unknown error')}} ,3000)};
   </script>
