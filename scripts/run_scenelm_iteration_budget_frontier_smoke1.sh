@@ -11,6 +11,14 @@ set -euo pipefail
 # interpenetration may therefore be an unconverged solve rather than an
 # upstream identity or size error.  This measures which one it is.
 #
+# The budget is an upper bound, not a step count: the solver stops early on a
+# small gradient, on lm_patience consecutive small reductions, or as soon as an
+# in-loop guarded Schur trial is accepted (_s4_layoutvlm_ops.py:6701-6705).
+# The unguarded branch cannot reach the patience criterion within two
+# iterations, so it is under-converged by construction; the guarded branch may
+# already stop at its first accepted trial.  Read executed_iterations and
+# converged from the emitted scenelm_solver record before reading the metrics.
+#
 # Reading guide:
 #   1. every branch differs only in the iteration budget.  Solver, both Schur
 #      gates, warm start, plane anchoring and all tolerances are copied
@@ -23,7 +31,10 @@ set -euo pipefail
 #      because the cost of a larger budget is half of the question
 #   4. one evaluation call covers all budgets, so collision and support come
 #      from identical tolerances
-#   5. rejected alternative: sweeping Paper30 first.  One scene shows the shape
+#   5. the ladder stops at 32: the patience criterion needs one substantive
+#      step plus lm_patience small ones, and Gauss-Newton on a few hundred
+#      residuals typically reaches the gradient tolerance well inside that
+#   6. rejected alternative: sweeping Paper30 first.  One scene shows the shape
 #      of the curve at 1/30 of the cost; only a visible knee justifies the full
 #      sweep
 
@@ -35,7 +46,7 @@ results_root="${SCENELM_BUDGET_RESULTS_ROOT:-a10_reusable_results/paper30}"
 log_root="${SCENELM_BUDGET_LOG_ROOT:-logs/scenelm_iteration_budget_frontier}"
 audit="${SCENELM_BUDGET_AUDIT_ROOT:-$results_root/sceneba_audit/scenelm_iteration_budget}"
 source_version="${SCENELM_BUDGET_SOURCE_VERSION:-v4_deepsearch}"
-budgets="${SCENELM_BUDGET_LIST:-2 8 32 128}"
+budgets="${SCENELM_BUDGET_LIST:-2 8 16 32}"
 runner="scripts/run_paper30_v4_s4_only_dual_gpu.sh"
 
 test -f "$manifest" || printf '%s\n' "${SCENELM_BUDGET_SCENE:-livingroom_10}" > "$manifest"
