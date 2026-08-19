@@ -1,5 +1,0 @@
-bathroom_02
-bedroom_50
-conferenceroom_01
-official_02
-workshop_02

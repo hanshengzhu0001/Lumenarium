@@ -1,4 +1,0 @@
-diningroom_02
-diningroom_16
-laundromat_01
-laundromat_02

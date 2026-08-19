@@ -1,0 +1,8 @@
+{
+  "seed": null,
+  "scene_id": null,
+  "job_id": null,
+  "profile": "best",
+  "pinned_at": null,
+  "note": "seed=null means the demo profile is disabled and /v1/jobs will refuse it. Fill it with: python scripts/pin_sceneproof_demo_seed_fix154.py set <seed-or-job-id>"
+}

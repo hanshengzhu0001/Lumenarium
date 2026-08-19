@@ -24,8 +24,10 @@
       <option value="fast">V5-fast — frozen Fix61</option>
       <option value="medium" selected>V5-medium — Fix61 + visual-safe cleanup</option>
       <option value="best">V5-best — Fix61 + exhaustive support repair</option>
+      <option value="demo">V5-demo — V5-best pinned to the rehearsed seed</option>
     </select><br>
     <small>Identical images reuse the same frozen S0-S3 and Fix61 cache across profiles.</small><br>
+    <small id="demo-pin">&nbsp;</small><br>
     <label><input name="force_rerun" type="checkbox" value="true"> Re-run only the selected final profile (reuse frozen S0-S3/Fix61)</label><br>
     <label><input name="force_cold_rerun" id="force-cold-rerun" type="checkbox" value="true"> Force a newly seeded cold S0-S4 run (ignore frozen cache; slower)</label><br>
     <button>Generate scene</button>
@@ -37,19 +39,26 @@
     const form=document.querySelector('#form'),status=document.querySelector('#status'),output=document.querySelector('#output'),bar=document.querySelector('#progress'),stageBox=document.querySelector('#stages');
     const stageDefs=[['s0','S0 Geometry'],['s1','S1 Parsing'],['s2','S2 Retrieval'],['s3','S3 Pose'],['s4','S4 Layout + Proof']];
     stageBox.innerHTML=stageDefs.map(([id,label])=>`<div class="stage" id="stage-${id}">${label}</div>`).join('');
+    const wanted=new URLSearchParams(location.search).get('profile');
+    if(wanted&&form.querySelector(`[name=profile] option[value="${wanted}"]`)){form.querySelector('[name=profile]').value=wanted;document.title=`Lumenarium · ${wanted}`;}
+    fetch('/v1/releases/current').then(response=>response.json()).then(info=>{const pin=(info||{}).demo_pin||{},node=document.querySelector('#demo-pin');
+      node.textContent=pin.seed?`V5-demo pins trial seed ${pin.seed}${pin.scene_id?` (rehearsed on scene ${String(pin.scene_id).slice(0,12)})`:''}.`:'V5-demo is unavailable on this host: no seed is pinned.'}).catch(()=>{});
     function stageGroup(name){if(name==='force_cold_rerun'||name.startsWith('S0_')||name.startsWith('s0_'))return's0';if(name.startsWith('S1_')||name.startsWith('s1_'))return's1';if(name.startsWith('S2_')||name.startsWith('s2_'))return's2';if(name.startsWith('S3_')||name.startsWith('s3_'))return's3';if(name.startsWith('s4_')||name==='render'||name==='packaging')return's4';return null}
     function paintStages(name,progress){const active=stageGroup(name),order=stageDefs.map(x=>x[0]),index=order.indexOf(active);stageDefs.forEach(([id])=>{const node=document.querySelector('#stage-'+id);node.className='stage'+(index>=0&&order.indexOf(id)<index?' done':id===active?' active':'')});if(name==='frozen_fix61_cache_hit'){['s0','s1','s2','s3'].forEach(id=>document.querySelector('#stage-'+id).className='stage done')}bar.value=Math.round(100*progress)}
     form.onsubmit=async event=>{event.preventDefault();output.innerHTML='';status.className='';
       const profile=form.querySelector('[name=profile]').value;
       if(profile==='best'&&!confirm('Audit every reconstructed object for a real support witness, then apply bounded transactional first-contact drops where safe?'))return;
+      if(profile==='demo'&&!confirm('Run V5-best with the pinned rehearsal seed instead of one derived from this job? Leave the cold-start box unchecked to reuse the frozen S0-S3 cache and reproduce the rehearsed scene in under a minute; check it to repeat the full S0-S4 cold run with that same seed.'))return;
       if(document.querySelector('#force-cold-rerun').checked&&!confirm('Run a completely new S0-S4 cold start? This ignores the frozen cache and can take 10-15 minutes per scene.'))return;
       const response=await fetch('/v1/jobs',{method:'POST',body:new FormData(form)}),body=await response.json();
       if(!response.ok){status.className='bad';status.textContent=JSON.stringify(body);return}
       const id=body.job.job_id;bar.value=0;paintStages('queued',0);status.textContent='Queued '+id;
-      const timer=setInterval(async()=>{const job=await(await fetch('/v1/jobs/'+id)).json();paintStages(job.stage,job.progress);status.textContent=`${job.stage} — ${Math.round(100*job.progress)}%`;
+      const timer=setInterval(async()=>{const job=await(await fetch('/v1/jobs/'+id)).json();paintStages(job.stage,job.progress);status.textContent=`${job.stage} — ${Math.round(100*job.progress)}%${job.worker?' · '+job.worker:''}`;
         if(job.state==='succeeded'){clearInterval(timer);const result=job.result||{},quality=result.status||'unresolved',unresolved=result.unresolved_object_ids||[];
           status.className=['sparse_geometry_certified','certified'].includes(quality)?'ok':'warn';
           status.textContent=result.profile==='best'?(quality==='sparse_geometry_certified'?'V5-best exhaustive support repair certified':`V5-best completed with unresolved objects: ${unresolved.join(', ')||'see evaluation.json'}`):(quality==='visual_salvaged'?'Visual-safe render completed (presentation only)':(['sparse_geometry_certified','certified'].includes(quality)?'Support contact certified':`Completed with unresolved objects: ${unresolved.join(', ')||'see evaluation.json'}`));
+          if(job.profile==='demo'&&result.trial_seed!==undefined){status.textContent+=` — ran on pinned trial seed ${result.trial_seed}`}
+          if(job.worker){status.textContent+=` · ${job.worker}`}
           output.innerHTML=`<img src="/v1/jobs/${id}/artifacts/render.png"><p><a href="/v1/jobs/${id}/artifacts/sceneproof-result.zip">Download result package</a></p>`}
         else if(['failed','cancelled'].includes(job.state)){clearInterval(timer);status.className='bad';status.textContent='Pipeline failed: '+(job.error||'unknown error')}} ,3000)};
   </script>

@@ -15,11 +15,17 @@ from pathlib import Path
 
 import requests
 
+from .demo_pin import UNSET_REASON, demo_seed
+
 
 ARTIFACTS = (
     "placement.json", "geometry.json", "render.png", "evaluation.json",
     "result.json", "sceneproof-result.zip",
 )
+# The runner script only accepts fast/medium/best.  Translating here, rather
+# than teaching the script a fourth profile, keeps the pipeline's behaviour
+# untouched: a demo run is a best run whose seed came from somewhere else.
+PIPELINE_PROFILE = {"demo": "best"}
 STAGE_PATTERN = re.compile(
     r"SCENEPROOF_API_STAGE=([A-Za-z0-9_.:-]+)\s+PROGRESS=([0-9.]+)"
 )
@@ -34,6 +40,21 @@ def trial_seed(job: dict) -> int:
     material = job["job_id"]
     digest = hashlib.sha256(material.encode("ascii")).digest()
     return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
+def resolve_seed(job: dict) -> int:
+    """Return the seed this job must run with.
+
+    Raising when a demo job has no pin is deliberate: silently seeding it from
+    the job id would produce a different sample of a stochastic pipeline while
+    every status message still read as success.
+    """
+    if job.get("profile") == "demo":
+        pinned = demo_seed()
+        if pinned is None:
+            raise RuntimeError(UNSET_REASON)
+        return pinned
+    return trial_seed(job)
 
 
 class Worker:
@@ -114,6 +135,7 @@ class Worker:
             )
             heartbeat.start()
             try:
+                requested_profile = job.get("profile", "medium")
                 command = [
                     "bash",
                     "scripts/run_sceneproof_frozen_single_job_fix115.sh",
@@ -121,10 +143,10 @@ class Worker:
                     str(input_path),
                     str(artifact_dir),
                     str(self.gpu),
-                    job.get("profile", "medium"),
+                    PIPELINE_PROFILE.get(requested_profile, requested_profile),
                 ]
                 process_env = os.environ.copy()
-                seed = trial_seed(job)
+                seed = resolve_seed(job)
                 process_env["LUMENARIUM_TRIAL_SEED"] = str(seed)
                 process_env["PYTHONHASHSEED"] = str(seed)
                 if requires_cold_rerun(job):

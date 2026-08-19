@@ -21,6 +21,14 @@ install_python() {
   cd "$ROOT"
   run_python python -m pip install --upgrade pip setuptools wheel
   run_python python -m pip install -r requirements.txt
+  # The API server that `bootstrap_lumenarium.sh start` launches
+  # (uvicorn sceneproof_api.app:app) needs FastAPI, uvicorn and
+  # python-multipart.  They are kept in a separate file because the offline
+  # pipeline never imports them, but they are not optional for anyone following
+  # the README: installing only requirements.txt made `start` die with
+  # ModuleNotFoundError: No module named 'fastapi' after `verify` had already
+  # reported success.
+  run_python python -m pip install -r requirements-api.txt
   # SAM3 support landed after older Transformers releases; upgrade explicitly.
   run_python python -m pip install --upgrade transformers huggingface_hub
   MAMBA_ROOT_PREFIX="$HOME/.mamba-root" "$MM" install -y -p "$ENV_PREFIX" \
@@ -106,7 +114,9 @@ verify() {
     run_imaginarium_I2Layout.py \
     run_imaginarium_I2Layout_v3.py \
     run_imaginarium_I2Layout_v4_deepsearch.py \
-    modules/retrieval.py
+    modules/retrieval.py \
+    sceneproof_api/app.py \
+    sceneproof_api/worker.py
 
   for path in \
     asset_data/imaginarium_asset_info.csv \
@@ -128,6 +138,26 @@ import torch
 from transformers import Sam3Model, Sam3Processor
 print("torch", torch.__version__, "cuda", torch.cuda.is_available(), "gpus", torch.cuda.device_count())
 print("SAM3 imports OK")
+PY
+
+  # The service stack is checked separately from the inference stack because
+  # `start` fails on exactly the dependencies the inference stack never needs.
+  # find_spec is used instead of importing sceneproof_api.app, which would
+  # create api_state/ and jobs.sqlite3 as a side effect of verification.
+  run_python python - <<'PY'
+import importlib.util
+missing = [
+    name for name in ("fastapi", "uvicorn", "multipart")
+    if importlib.util.find_spec(name) is None
+]
+if missing:
+    raise SystemExit(
+        "MISSING_API_DEPENDENCIES=" + ",".join(missing)
+        + " -- run: python -m pip install -r requirements-api.txt"
+    )
+import fastapi, uvicorn
+print("fastapi", fastapi.__version__, "uvicorn", uvicorn.__version__)
+print("SCENEPROOF_API dependencies OK")
 PY
 
   "$ROOT/third_party/blender-4.3.2-linux-x64/blender" --version | head -1

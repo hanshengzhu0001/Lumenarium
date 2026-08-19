@@ -1,4 +1,0 @@
-casino_01
-diningroom_01
-casino_02
-kitchen_04

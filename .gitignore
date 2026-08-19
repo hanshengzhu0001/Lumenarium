@@ -74,3 +74,17 @@ config/.env
 !asset_data/imaginarium_asset_info.csv
 !config/config-example.yaml
 batch_process_images.sh
+
+# ===== Local scratch that must never reach the repository =====
+# One-off probe scripts live at the root while a question is open and are
+# deleted afterwards; __init__.py is tracked and therefore unaffected.
+/_*.py
+!/__init__.py
+*_backup_*.pptx
+intern_summary_*preview*/
+intern_summary_preview_montage.jpg
+docs_site_preview.png
+Hansheng_Zhu_Resume_*
+tools/build_resume_docx.py
+intern_summary_assets/
+Lumenarium_暑期实习总结_逐页讲稿.md

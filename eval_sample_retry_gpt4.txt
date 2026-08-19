@@ -1,4 +1,0 @@
-diningroom_01
-kitchen_01
-official_01
-supermarket_01

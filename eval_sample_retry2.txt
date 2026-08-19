@@ -1,9 +1,0 @@
-bedroom_40
-bedroom_42
-bedroom_46
-bedroom_47
-bedroom_50
-dental_office_03
-livingroom_03
-livingroom_17
-official_03

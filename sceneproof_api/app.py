@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 
 from . import RELEASE_ID
+from .demo_pin import UNSET_REASON, load_demo_pin
 from .store import JobStore
 
 
@@ -28,6 +30,11 @@ PUBLIC_ARTIFACTS = (
     "result.json", "sceneproof-result.zip",
 )
 INPUT_SIZE = (1024, 1024)
+# "demo" is a submission-time profile, not a pipeline profile: the worker runs
+# the "best" pipeline for it and only replaces the seed.  Keeping the pipeline's
+# own profile space at fast/medium/best means adding this choice cannot change
+# how any existing profile behaves.
+PROFILES = ("fast", "medium", "best", "demo")
 
 
 def _normalize_input_image(payload: bytes) -> tuple[bytes, tuple[int, int]]:
@@ -99,11 +106,28 @@ def _authorize_worker(token: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
+def _worker_label(worker_id: str | None) -> str | None:
+    """Say which GPU is running a job without publishing the host name.
+
+    Two workers share one queue, so a side-by-side demonstration needs to show
+    that the two submissions really landed on different cards.  The raw
+    worker_id is internal infrastructure detail and stays hidden.
+    """
+    if not worker_id:
+        return None
+    tail = worker_id.rsplit(":", 1)[-1]
+    return tail if re.fullmatch(r"gpu\d+", tail) else "worker"
+
+
 def _public_job(job: dict) -> dict:
-    return {
+    public = {
         key: value for key, value in job.items()
         if key not in {"input_path", "artifact_dir", "worker_id", "lease_expires_at"}
     }
+    label = _worker_label(job.get("worker_id"))
+    if label:
+        public["worker"] = label
+    return public
 
 
 @app.get("/healthz")
@@ -113,6 +137,7 @@ def health() -> dict:
 
 @app.get("/v1/releases/current")
 def current_release() -> dict:
+    pin = load_demo_pin()
     return {
         "release_id": RELEASE_ID,
         "pipeline": [
@@ -125,7 +150,11 @@ def current_release() -> dict:
             "fast": "frozen Fix61; no online pose mutation",
             "medium": "Fix61 + presentation-only floor fallback and bounded render suppression",
             "best": "Fix61 + exhaustive true-surface support audit and transactional first-contact repair",
+            "demo": "the best profile with the trial seed pinned to a recorded run instead of derived from the job id",
         },
+        # Reported so an operator can confirm the pin before a live run rather
+        # than inferring it afterwards from result.json.
+        "demo_pin": pin or {"seed": None, "reason": UNSET_REASON},
         "input": {
             "formats": ["image/png", "image/jpeg"],
             "normalized_size": list(INPUT_SIZE),
@@ -151,11 +180,28 @@ async def create_job(
     if not payload or len(payload) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="image must be 1 byte to 25 MiB")
     payload, source_size = _normalize_input_image(payload)
-    if profile not in {"fast", "medium", "best"}:
-        raise HTTPException(status_code=422, detail="profile must be fast, medium or best")
+    if profile not in PROFILES:
+        raise HTTPException(
+            status_code=422,
+            detail="profile must be one of " + ", ".join(PROFILES),
+        )
+    pinned_seed = None
+    if profile == "demo":
+        pinned_seed = load_demo_pin().get("seed")
+        if pinned_seed is None:
+            raise HTTPException(status_code=422, detail=UNSET_REASON)
     digest = hashlib.sha256(payload).hexdigest()
-    rerun_id = uuid.uuid4().hex if (force_rerun or force_cold_rerun) else None
-    rerun_kind = "cold" if force_cold_rerun else "profile"
+    # A demo submission always gets a job of its own.  Returning a prior job on
+    # an idempotency hit would display that job's cached render while the UI
+    # said the pipeline had just run, which is exactly the confusion a live
+    # demonstration cannot afford.
+    demo_run = profile == "demo"
+    rerun_id = (
+        uuid.uuid4().hex
+        if (force_rerun or force_cold_rerun or demo_run)
+        else None
+    )
+    rerun_kind = "cold" if force_cold_rerun else ("demo" if demo_run else "profile")
     if rerun_id:
         key_prefix = idempotency_key or (
             f"sha256:{digest}:release:{RELEASE_ID}:profile:{profile}"
@@ -182,6 +228,7 @@ async def create_job(
     return {
         "job": _public_job(job),
         "created": created,
+        "pinned_seed": pinned_seed,
         "input": {
             "source_size": list(source_size),
             "normalized_size": list(INPUT_SIZE),

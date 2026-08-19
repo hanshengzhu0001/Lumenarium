@@ -17,7 +17,15 @@ nohup env SCENEPROOF_WORKER_TOKEN="$SCENEPROOF_WORKER_TOKEN" "$HOME/.venvs/lumen
   > "$HOME/Lumenarium/logs/sceneproof_api_server.log" 2>&1 < /dev/null &
 server_pid=$!
 for _ in $(seq 1 30); do curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null && break; sleep 1; done
-curl --fail --silent http://127.0.0.1:8080/healthz; echo
+# The server is started under nohup, so an import-time failure exists only in
+# its log.  Without surfacing it here the sole symptom is a silent curl failure,
+# which points the reader at the network instead of at the real cause.
+if ! curl --fail --silent http://127.0.0.1:8080/healthz; then
+  echo "SCENEPROOF_API_START_FAILED=1 log=$HOME/Lumenarium/logs/sceneproof_api_server.log" >&2
+  tail -n 40 "$HOME/Lumenarium/logs/sceneproof_api_server.log" >&2 || true
+  exit 1
+fi
+echo
 IFS=',' read -r -a gpu_ids <<< "${SCENEPROOF_API_GPU_IDS:-0,1}"
 for gpu in "${gpu_ids[@]}"; do
   test -n "$gpu" || continue

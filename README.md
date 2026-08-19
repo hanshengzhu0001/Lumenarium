@@ -94,6 +94,17 @@ V4 的主要收益来自 DeepSearch 缩短资产检索；V5 的结构性加速�
 只更新违反约束的对象与自由度，并通过精确 leaf-translation Schur elimination 消去安全的局部变量。
 因此 S4 从 677.770 秒降至 192.930 秒，即 **3.513×**。
 
+**复现这个数字需要两个显式设置，代码默认值给不出它。** 第一，`IMAGINARIUM_LAYOUTVLM_SOLVER`
+的代码默认值是 `adam`（`modules/S4_blender_layout_and_corr.py:11128`）；上面这条二阶路径由跑法脚本
+显式设为 `v5_scenelm`（`scripts/run_sceneproof_fix43_inloop_fullstack_smoke5_fix56.sh`，
+报告与线上服务共用）。按默认值直接跑得到的是一阶路径，复现不出该数字。第二，**这条路径上的迭代预算是
+2 步 LM 迭代，不是 5,000 步**：同一脚本里写着 `IMAGINARIUM_LAYOUTVLM_ITERATIONS=2`，而 2 是稳定
+线性化门允许的最小值（`modules/_s4_layoutvlm_ops.py:3707` 在 iterations 小于
+`SCENEPROOF_STABLE_LINEARIZATIONS` 时直接报错）。也就是说这个预算是为通过该门选定的，不是收敛性
+调优的结果。报告 3.513× 时必须同时声明这个预算差——SA-5000 的 5,000 次随机试探，对二阶求解器的
+2 次带守卫迭代。该预算是否欠收敛尚无结论，实测入口是
+`scripts/run_scenelm_iteration_budget_frontier_smoke1.sh`。
+
 | 阶段 | 平均秒/场景 | Paper30 有效 GPU 小时 | 说明 |
 |---|---:|---:|---|
 | S0 几何/深度 | 9.687 | 0.081 | 相机与房间几何初始化 |
@@ -142,9 +153,23 @@ visible-support certificate、可复用冷启动缓存、双 GPU worker、Web/AP
    | **V5-fast** | 论文定量、快速预览 | 冻结 Fix61，不执行展示性删除 |
    | **V5-medium** | 演示、技术美术交付 | Fix61 + 保守 visual-safe 清理 |
    | **V5-best** | 最高物理完整性 | 单次 V5-fast + 全对象真实支撑审计与事务化 first-contact 掉落 |
+   | **V5-demo** | 现场演示 | 与 V5-best 完全相同的流水线，但 trial seed 取自已排练过的那次运行，而不是由 job id 派生 |
 4. 点击 **Generate scene**。新图完整运行 S0--S4；字节完全相同的图片复用冻结的
    S0--S3/Fix61 缓存。切换模式时会从共享缓存继续，只运行对应的最终策略。
 5. 等待页面依次显示 S0、S1、S2、S3、S4 完成，然后下载结果 ZIP。
+
+**V5-demo 的前提**：seed 是单机状态，仓库里不携带。未钉住时 `POST /v1/jobs` 直接返回
+422，而不会退回派生 seed——否则页面照样显示成功，而实际跑的是另一个随机样本。钉住方式：
+
+```bash
+python scripts/pin_sceneproof_demo_seed_fix154.py list        # 列出本机每次运行的 seed
+python scripts/pin_sceneproof_demo_seed_fix154.py set <seed|job_id>
+curl -s http://127.0.0.1:8080/v1/releases/current             # demo_pin 字段可复核
+```
+
+跑完后页面会显示实际使用的 trial seed，`result.json` 里的 `trial_seed` 也应与钉住值一致。
+需要注意 seed 只约束本机随机源：VLM 服务端不承诺跨请求可复现，所以冷启动是「高度相似」
+而非逐位一致；要逐位一致就不要勾选 cold start，让它命中冻结缓存。
 
 需要重新运行时有两个不同选项：**Re-run only the selected final profile** 仍复用
 冻结的 S0--S3/Fix61，只重跑最终策略；**Force a new cold S0-S4 run** 会忽略冻结
@@ -424,6 +449,20 @@ semantic constraints into Relation Programs, updates only implicated objects and
 uses exact leaf-translation Schur elimination where safe. This reduces S4 from 677.770 s to 192.930 s,
 or **3.513×**.
 
+**Two explicit settings are required to reproduce that number; the code defaults do not produce it.**
+First, `IMAGINARIUM_LAYOUTVLM_SOLVER` defaults to `adam` in code
+(`modules/S4_blender_layout_and_corr.py:11128`). The second-order path above is selected explicitly by the
+run script shared by the reported measurements and the hosted service
+(`scripts/run_sceneproof_fix43_inloop_fullstack_smoke5_fix56.sh`); running with the default gives the
+first-order path and does not reproduce the number. Second, **the iteration budget on that path is 2 LM
+iterations, not 5,000**: the same script sets `IMAGINARIUM_LAYOUTVLM_ITERATIONS=2`, and 2 is the smallest
+value the stable-linearization gate accepts (`modules/_s4_layoutvlm_ops.py:3707` raises when iterations is
+below `SCENEPROOF_STABLE_LINEARIZATIONS`). The budget was therefore chosen to clear that gate, not tuned
+for convergence. Any report of 3.513× must state the budget gap alongside it: 5,000 random trials for
+SA-5000 against 2 guarded iterations for the second-order solver. Whether that budget is under-converged
+is not yet settled; the measurement entry point is
+`scripts/run_scenelm_iteration_budget_frontier_smoke1.sh`.
+
 The cold benchmark contains all stages from image input through the final S4
 placement. Final 256-sample rendering is reported separately.
 
@@ -522,6 +561,21 @@ image
   -> placement.json + render.png + evaluation.json + result bundle
 ```
 
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `run_imaginarium_I2Layout*.py` | one entry point per pipeline version; `_v4_deepsearch` is the S0--S3 path the API uses |
+| `modules/` | the pipeline. `S4_blender_layout_and_corr.py` is S4; `_s4_layoutvlm_ops.py` holds the SceneLM solver and the SceneProof guards |
+| `sceneproof_api/` | FastAPI service, job store, worker and web UI |
+| `scripts/` | run and evaluation entry points. `run_paper30_v4_s4_only_dual_gpu.sh` is the S4 runner every experiment wraps; `run_sceneproof_frozen_single_job_fix115.sh` is what the API worker invokes |
+| `sceneproof_*.py` (repository root) | audit and screening tools, one per investigated mechanism. Each is imported as a top-level module by a test in `tests/`, which is why they stay at the root |
+| `eval_*.py` | evaluators. `eval_physical_realizability.py` produces the physical numbers reported above |
+| `tests/` | unit tests covering the audits, the solver wiring and the API surface |
+| `config/` | configs in use. `config/archive/` keeps one-off probe configs from finished experiments for provenance only |
+| `docs/` | published site and the mathematical formulation; `docs/archive/` keeps superseded status notes |
+| `asset_data/imaginarium_asset_info.csv` | authored asset dimensions in metres, used as the retrieval size prior |
+
 ## Start from a clean machine
 
 ### Minimum and recommended hardware
@@ -548,19 +602,19 @@ stored in Git:
 
 | Resource | Source | Local destination |
 |---|---|---|
-| FBX asset library and metadata | `HiHiAllen/Imaginarium-Dataset` | `asset_data/imaginarium_assets`, CSV metadata |
-| placement spaces and textures | Imaginarium datasets | `asset_data/` |
-| rendered asset views and embeddings | `binicey/Imaginarium-3D-Derived-Dataset` | `asset_data/imaginarium_assets_render_results`, patch embeddings |
-| precomputed asset voxels | derived dataset | `asset_data/imaginarium_assets_voxels` |
-| DINOv2 ViT-L/14 | derived dataset / Hugging Face | `weights/dinov2_vitl14.pth` |
-| AE pose network | derived dataset | `weights/ae_net_pretrained_weights.pth` |
-| Depth Anything V2 metric model | derived dataset | `weights/depth_anything_v2_metric_hypersim_vitl.pth` |
-| SAM3 | `facebook/sam3` | Hugging Face cache |
-| Blender 4.3.2 | derived dataset | `third_party/blender-4.3.2-linux-x64` |
+| FBX asset library and metadata | [`HiHiAllen/Imaginarium-Dataset`](https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset) | `asset_data/imaginarium_assets`, CSV metadata |
+| placement spaces and textures | [`HiHiAllen/Imaginarium-Dataset`](https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset) | `asset_data/` |
+| rendered asset views and embeddings | [`binicey/Imaginarium-3D-Derived-Dataset`](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset) | `asset_data/imaginarium_assets_render_results`, patch embeddings |
+| precomputed asset voxels | [`binicey/Imaginarium-3D-Derived-Dataset`](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset) | `asset_data/imaginarium_assets_voxels` |
+| DINOv2 ViT-L/14 | [`facebook/dinov2-large`](https://huggingface.co/facebook/dinov2-large) — checkpoint mirrored in the derived dataset | `weights/dinov2_vitl14.pth` |
+| AE pose network | [`binicey/Imaginarium-3D-Derived-Dataset`](https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset) | `weights/ae_net_pretrained_weights.pth` |
+| Depth Anything V2 metric model | [`depth-anything/Depth-Anything-V2-Metric-Hypersim-Large`](https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large) | `weights/depth_anything_v2_metric_hypersim_vitl.pth` |
+| SAM3 | [`facebook/sam3`](https://huggingface.co/facebook/sam3) | Hugging Face cache |
+| Blender 4.3.2 | [blender.org release](https://download.blender.org/release/Blender4.3/) — mirrored in the derived dataset | `third_party/blender-4.3.2-linux-x64` |
 
-Some Hugging Face resources may require accepting their license and exporting
-`HF_TOKEN`. Asset and dataset licenses remain those of their respective
-authors.
+`facebook/sam3` and some other Hugging Face resources are gated: accept the
+license on the model page and export `HF_TOKEN` before running the setup
+script. Asset and dataset licenses remain those of their respective authors.
 
 ### Visual API requirements
 
@@ -717,7 +771,12 @@ and render.
    **V5-medium** for Fix61 plus presentation-oriented visual-safe cleanup.
    Choose **V5-best** for one V5-fast run followed by an exhaustive true-surface
    support audit and transactional first-contact repair over all reconstructed
-   objects.
+   objects. Choose **V5-demo** to run the V5-best pipeline with the trial seed
+   pinned to a rehearsed run instead of derived from the job id; the seed is host
+   state, so `POST /v1/jobs` refuses this profile with 422 until it is pinned
+   with `python scripts/pin_sceneproof_demo_seed_fix154.py set <seed-or-job-id>`.
+   Refusing is deliberate: a silent fallback to a derived seed would still report
+   success while running a different sample.
 4. Click **Generate scene**. A new image runs the complete S0--S4 pipeline.
    A byte-identical image reuses the frozen S0--S3/Fix61 cache; switching
    profiles resumes from that shared cache and runs only the selected final

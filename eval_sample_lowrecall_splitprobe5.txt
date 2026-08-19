@@ -1,5 +1,0 @@
-supermarket_01
-streelitter_01
-workshop_01
-laundromat_01
-livingroom_02

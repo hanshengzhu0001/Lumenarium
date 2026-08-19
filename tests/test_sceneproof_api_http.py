@@ -53,6 +53,9 @@ class SceneProofAPIHTTPTest(unittest.TestCase):
             headers=token,
         )
         self.assertEqual(job_id, claimed.json()["job"]["job_id"])
+        running = self.client.get(f"/v1/jobs/{job_id}").json()
+        self.assertEqual("gpu0", running["worker"])
+        self.assertNotIn("worker_id", running)
         wrong = token | {"X-Worker-ID": "host-b:gpu0"}
         owner = token | {"X-Worker-ID": "host-a:gpu0"}
         self.assertEqual(
