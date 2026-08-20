@@ -61,8 +61,15 @@ the physical macro score from 54.58\% to 62.10\%.  Its final SceneLM plus
 SceneProof S4 takes 359.26~s/scene, a $1.887\times$ speedup over legacy S4;
 the V5-fast SceneLM/Fix61 core alone takes 192.93~s/scene.  Including measured
 cold S0--S3 compute gives 829.88~s/scene for V5-fast and 996.21~s/scene for
-V5-medium.  We finally outline V5-high, which selects among
-three cold starts using observable certificates rather than ground truth.
+V5-medium.  A systematic iteration-budget study yields our most instructive
+negative result: raising the solver budget from two to four, eight, or sixteen
+steps monotonically \emph{reduces} the equal-weight macro score, and neither
+trust-region tightening nor explicit warm-start regularization recovers the
+loss.  We show this is structural rather than a tuning failure---three of the
+four scored families are anchored to the initialization, so the two-step
+operating point acts as an implicit trust region.  We finally outline V5-best,
+which selects among three cold starts using observable certificates rather
+than ground truth.
 \end{abstract}
 
 \section{Introduction}
@@ -95,8 +102,12 @@ executable certificate: each accepted edit is backed by declared witnesses,
 checked physical and visual inequalities, and byte-safe rollback state.
 
 The final pipeline also integrates a DeepSearch retrieval path contributed by
-Calvin Gu and collaborators at Tencent.  This contribution is upstream of our
-SceneLM/SceneProof backend and is attributed separately throughout the paper.
+our advisor's team at Tencent.  DeepSearch is a production-grade asset
+retriever: it indexes a library on the order of $10^5$ assets and returns the
+most relevant candidates in under one second per query, which makes exhaustive
+per-object retrieval affordable inside an interactive pipeline.  This
+contribution is upstream of our \method{}/\proofsys{} backend and is attributed
+separately throughout the paper.
 Our cached results reveal an important distinction: DeepSearch preserves high
 object recovery but changes retrieved asset frames and parent statistics,
 which coincides with lower absolute pose AUC.  Because V4-deepsearch and
@@ -104,6 +115,13 @@ V5-fast share frozen upstream outputs and have nearly identical pose metrics,
 the large V3-to-V4 pose change cannot be attributed to \method{} or
 \proofsys{}.  A seed-locked S2-only ablation remains necessary for strict
 causal attribution.
+
+Code, the hosted service, and reproduction scripts are public.\footnote{Code:
+\url{https://github.com/hanshengzhu0001/Lumenarium}. Project page:
+\url{https://hanshengzhu0001.github.io/Lumenarium/}. Hosted system:
+\url{https://embedding.lightart.qq.com/}. Asset library and derived data:
+\url{https://huggingface.co/datasets/HiHiAllen/Imaginarium-Dataset} and
+\url{https://huggingface.co/datasets/binicey/Imaginarium-3D-Derived-Dataset}.}
 
 Our contributions are:
 \begin{itemize}
@@ -113,9 +131,14 @@ Our contributions are:
   containment, collision exclusion, alignment, and semantic relations into
   owned residual and certificate channels;
   \item a relation-conditioned $\mathrm{SO}(3)$ Levenberg--Marquardt solver
-  with trust regions, active coordinates, and safe Schur elimination; and
+  with trust regions, active coordinates, and safe Schur elimination;
   \item component-wise executable certificates and scoped rollback that
-  improve physical realizability while preserving the upstream pose estimate.
+  improve physical realizability while preserving the upstream pose estimate;
+  and
+  \item an iteration-budget analysis showing that, when most scored families
+  are anchored to the initialization, a two-step budget is the empirical
+  optimum and additional optimization is strictly negative-expectation---a
+  measurement-design lesson that generalizes beyond this system.
 \end{itemize}
 
 \section{Method}
@@ -135,7 +158,7 @@ following lineage:
   \item \textbf{V5-fast:} frozen V4 S0--S3 followed by SceneLM/Fix61;
   \item \textbf{V5-medium:} V5-fast plus Fix114 true-mesh support/visibility
   repair; and
-  \item \textbf{V5-high (planned):} three V5 cold starts followed by a
+  \item \textbf{V5-best (planned):} three V5 cold starts followed by a
   certificate-only selector, with no access to evaluation ground truth.
 \end{enumerate}
 
@@ -241,7 +264,7 @@ For predicted reduction $\widehat{\Delta E}$ and actual reduction $\Delta E$,
 the gain ratio is
 \begin{equation}
   \gamma_k=\frac{E(x_k)-E(x_k+\Delta x_k)}
-  {-[g_k^\top\Delta x_k+	frac12\Delta x_k^\top H_k\Delta x_k]}.
+  {-[g_k^\top\Delta x_k+\tfrac12\Delta x_k^\top H_k\Delta x_k]}.
 \end{equation}
 The step is accepted only if it is finite, decreases the nonlinear objective,
 and $\gamma_k$ exceeds a threshold.  High-ratio steps halve damping; weak
@@ -290,16 +313,66 @@ rather than discarding unrelated accepted components.  Missing evidence yields
 \textsc{Abstain}; unresolved visible support/attachment failures are surfaced
 instead of being silently labeled successful.
 
-\subsection{Fast and high-quality operating points}
+\subsection{Fast, medium, and best operating points}
 
-\textbf{V5-fast} executes one cold start and SceneLM/Fix61. It is the
-quantitative paper default. \textbf{V5-medium} additionally executes the
-conservative Fix114 true-mesh support/visibility repair layer.
-\textbf{V5-high} is planned as three independent cold starts followed by a
+\textbf{V5-fast} executes one cold start and \method{}/Fix61. It is the
+quantitative paper default: two LM iterations, semantic weight $0.5$, and
+warm-start weight $0.01$. \textbf{V5-medium} additionally executes the
+conservative Fix114 true-mesh support/visibility repair layer; it is a
+presentation profile and its quality row is never merged into the headline
+table. \textbf{V5-best} runs three independent cold starts followed by a
 selector over observable evidence: certificate coverage, hard-program status,
 physical component scores, image agreement, and runtime.  Ground truth is
-never a selector feature.  Flux fine-tuning is a separate future upstream
-ablation and is not part of the reported V5-fast results.
+never a selector feature, so the profile remains a legitimate test-time
+procedure rather than an oracle.  Flux fine-tuning is a separate future
+upstream ablation and is not part of the reported V5-fast results.
+
+\subsection{Early stopping as an implicit trust region}
+\label{sec:earlystop}
+
+The two-iteration budget of Fix61 deserves an explicit account, because it
+looks like premature termination.  Solver diagnostics confirm it is not a
+convergence event: the persisted certificate reports
+\texttt{executed\_iterations}~$=2$ with \texttt{converged}~$=$~\textsc{false},
+and one of the two steps is already rejected by the gain-ratio test.  The
+budget is an imposed constraint, and we argue it is the correct one.
+
+Let $\mathcal{F}=\{\mathrm{coll},\mathrm{supp},\mathrm{plane},\mathrm{sem}\}$
+be the scored families and $\bar T$ the frozen warm start produced by S0--S3.
+Two properties of the evaluation are decisive.  First, the semantic family is
+gated on warm-start self-consistency: a declared relation enters the scored set
+only if $\bar T$ already satisfies it within tolerance, so relations the
+initialization violates are abstained rather than scored.  Second, the support
+family is defined relative to the S3 support tree, and the plane family is
+invariant to the in-plane motions the solver can express.  Writing
+$m_c(\cdot)$ for the family scores, this means
+\begin{equation}
+  \arg\max_{T} m_c(T)\;\approx\;\bar T
+  \quad\text{for } c\in\{\mathrm{supp},\mathrm{plane},\mathrm{sem}\},
+  \label{eq:anchored}
+\end{equation}
+whereas only $m_{\mathrm{coll}}$ has its maximizer strictly away from $\bar T$
+whenever the initialization contains interpenetration.  The equal-weight macro
+\begin{equation}
+  M(T)=\tfrac14\!\!\sum_{c\in\mathcal{F}}\!\! m_c(T)
+\end{equation}
+therefore decomposes into three \emph{fidelity} terms that any displacement can
+only decrease and one \emph{improvement} term that displacement can increase.
+Because the solver descends $E$ in \eqref{eq:objective} rather than ascending
+$M$, and $E$ weights collision and contact above semantic, each additional
+accepted step trades fidelity for improvement at a ratio that is unfavourable
+under equal family weights.  Truncating the trajectory after two steps bounds
+the achievable displacement $\|T-\bar T\|$ and thus bounds the fidelity loss:
+early stopping is a trust region on the initialization, expressed in iteration
+count instead of in the objective.
+
+This account is falsifiable, and we test it three ways in
+Section~\ref{sec:budget}.  If the mechanism were merely excessive per-step
+rotation, capping the yaw step while keeping the total angular budget fixed
+would restore the score; if it were an implicit-versus-explicit mismatch,
+raising the warm-start weight $w_{\mathrm{ws}}$ in $E$ would let a larger
+budget succeed.  Neither holds, which is what promotes
+\eqref{eq:anchored} from a convenient story to the operative explanation.
 
 \section{Experimental Setup}
 
@@ -420,6 +493,102 @@ V5-medium S0--S4 compute & 996.21 s & 8.30 h & --- \\
 \end{tabular}
 \end{table}
 
+\subsection{The iteration budget is already optimal at two steps}
+\label{sec:budget}
+
+Section~\ref{sec:earlystop} predicts that additional solver budget is
+negative-expectation under an equal-weight macro whose majority of families is
+anchored to the warm start.  Table~\ref{tab:budget} reports the test on a
+five-scene subset (\textsc{bedroom\_01}, \textsc{livingroom\_10},
+\textsc{casino\_01}, \textsc{official\_01}, \textsc{streetlitter\_01}) with the
+S3 source, geometry, and evaluator frozen; only the S4 configuration varies.
+
+Three findings follow.  First, budget alone is harmful and the damage is
+front-loaded: the semantic family falls from 0.7634 at two steps to 0.5209 at
+four and then saturates at 0.5210 by eight, so the optimum at two steps is a
+cliff edge rather than the peak of a smooth curve.  Second, the collision
+family---the only one whose maximizer lies away from $\bar T$---does improve
+with budget (0.4301 to 0.4436), exactly as \eqref{eq:anchored} predicts, but
+its $\tfrac14$ weight cannot pay for the fidelity loss.  Third, both proposed
+rescues fail.  Reducing the per-step yaw cap from $15^\circ$ to $3.75^\circ$
+while raising the step count from two to eight holds the total angular budget
+fixed at $30^\circ$ and recovers only $63\%$ of the semantic deficit, while
+support degrades further because the trust region reallocates the step into
+translation; additionally tightening the translation cap to $0.05$~m loses the
+recovered semantic again.  Raising $w_{\mathrm{ws}}$ from $0.01$ to $0.3$ is
+worse than doing nothing.  We also verified that the horizontal
+footprint-containment residual is \emph{already} present in $E$ with unit
+weight, so the support degradation is not an omitted-term artifact.
+
+Two caveats bound this claim.  The comparison is over a step-count, step-cap,
+and weight grid, not over all conceivable regularizers; and the conclusion is
+stated with respect to \emph{this} equal-weight macro, which by construction
+rewards agreement with the initialization on three of four families.  A
+metric that weighted collision more heavily, or that scored semantic relations
+the initialization violates, would move the optimum.
+
+\begin{table}[t]
+\centering
+\caption{Iteration-budget frontier on the five-scene subset with frozen S3
+geometry and evaluator.  All arms use the second-order \method{} solver; only
+the S4 configuration varies.  The two-step Fix61 operating point is optimal in
+macro, and every attempt to spend more budget profitably fails.}
+\label{tab:budget}
+\small
+\begin{tabular}{lcccc}
+\toprule
+S4 configuration & macro $\uparrow$ & coll. & supp. & sem. \\
+\midrule
+Fix61: 2 steps (default) & \textbf{0.6183} & 0.4301 & \textbf{0.5684} & \textbf{0.7634} \\
+4 steps & 0.5782 & 0.4394 & 0.5459 & 0.5209 \\
+8 steps & 0.5828 & \textbf{0.4436} & 0.5480 & 0.5210 \\
+8 steps, yaw cap $3.75^\circ$ & 0.6004 & 0.4380 & 0.5391 & 0.6741 \\
+8 steps, yaw $3.75^\circ$ + trans. $0.05$ m & 0.5799 & 0.4304 & 0.5495 & 0.5943 \\
+8 steps, $w_{\mathrm{ws}}=0.3$ & 0.5672 & 0.4130 & 0.5510 & 0.4563 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Second-order robustness}
+
+A first-order Adam variant with hard projection reaches a higher single-scene
+macro than \method{} (0.6822 versus 0.6338 at its own best budget), but it does
+not complete the five-scene subset: on \textsc{official\_01}, a 112-object
+scene with fourteen support footprints whose initial error exceeds $0.5$~m, the
+half-space projection has no feasible point and the stage aborts.  \method{}
+completes all five scenes because infeasible relations enter as weighted
+residuals and, when necessary, are released by the bounded relation-release
+mechanism rather than raising.  Relative to legacy SA5000, the second-order
+solver improves the collision family from 0.3719 to 0.4301 ($+15.6\%$
+relative).  We therefore treat robustness, not single-scene optimality, as the
+operative argument for the second-order path.
+
+\begin{figure*}[t]
+\centering
+\begin{tabular}{cccc}
+\includegraphics[width=0.235\textwidth]{../visual_results/livingroom_10_worst_input.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/livingroom_10_worst_v1_final.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/livingroom_10_worst_v3_final.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/livingroom_v5_final.png} \\
+\includegraphics[width=0.235\textwidth]{../visual_results/official_02_worst_input.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/official_02_worst_v1_final.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/official_02_worst_v3_final.png} &
+\includegraphics[width=0.235\textwidth]{../visual_results/official_v5_final.png} \\
+\small (a) input image & \small (b) V1 (legacy SA) & \small (c) V3 support-aware &
+\small (d) V5-fast \\
+\end{tabular}
+\caption{Qualitative comparison on the two hardest scenes of the benchmark,
+\textsc{livingroom\_10} (top) and \textsc{official\_02} (bottom).  These are
+selected as worst-case rather than best-case examples.  V1 exhibits floating
+and interpenetrating objects that its stochastic refinement does not resolve;
+V3 repairs support parents and stacking but still leaves collisions; V5-fast
+additionally certifies contact, containment, and collision non-worsening
+component-wise, so remaining defects are surfaced as unresolved rather than
+silently accepted.  All three results share the same input image and, for V4
+onward, the same frozen upstream S0--S3 state.}
+\label{fig:qualitative}
+\end{figure*}
+
 \subsection{Failure handling and qualitative repair}
 
 The final support/visibility layer is intentionally conservative.  It costs
@@ -431,6 +600,43 @@ as physically or visually unresolved.  This prevents a visually appealing
 single-scene edit from silently degrading the benchmark.  It also explains why
 the quantitative anchor and the qualitative visual variant are recorded
 together rather than conflated.
+
+\section{Discussion}
+
+\paragraph{Optimization and measurement must be co-designed.}
+The clearest lesson from Section~\ref{sec:budget} is not that our solver is
+weak but that our score is anchored.  When three of four scored families reward
+agreement with the initialization, the benchmark measures \emph{fidelity plus a
+quarter of improvement}, and a stronger optimizer cannot express its advantage.
+This is a general hazard for single-image layout work: metrics built by
+comparing against the pipeline's own initialization, or by abstaining on
+relations the initialization violates, silently convert an improvement task
+into a preservation task.  We report the negative result in full because the
+alternative---quietly reporting only the two-step number---would leave readers
+to rediscover the same wall.
+
+\paragraph{The solver objective and the evaluator disagree in aggregation.}
+Our residual uses a mean over semantic relations while the evaluator takes a
+per-object maximum.  A solver can therefore reduce mean violation while
+worsening an object's worst relation.  This is a concrete, addressable
+mismatch, and we name it as unfinished rather than claim the aggregation is
+principled.
+
+\paragraph{Robustness is a first-class result, not a footnote.}
+The first-order variant achieved a better single-scene score yet could not
+complete the benchmark, because hard projection has no feasible point when the
+initialization is badly wrong.  Guarded second-order iteration with bounded
+relation release degrades gracefully instead.  For content pipelines, where a
+single aborted scene costs an artist a full round trip, completion rate
+dominates a fractional score improvement.
+
+\paragraph{Certificates change what a failure means.}
+Because \proofsys{} commits component-wise and rolls back only the owners and
+separators of failed witnesses, an unrepairable defect becomes an
+\emph{annotated} defect rather than a silent one.  In production this converts
+debugging from visual inspection of the whole scene to reading a list of
+unresolved witnesses.  We consider this, rather than the speedup, the property
+most likely to transfer to other systems.
 
 \section{Limitations and Future Work}
 
@@ -444,9 +650,27 @@ comparison cannot isolate DeepSearch from cold-start and asset-library
 confounders.  A paired S2-only experiment should freeze S1 masks, graph,
 camera, seed, S3, and S4 while switching only the retriever.
 
-Our next operating point, V5-high, will run three cold starts and choose the
+Fifth, the budget conclusion of Section~\ref{sec:budget} is grid-bounded: it
+covers step count, per-step translation and rotation caps, semantic weight, and
+warm-start weight, but not every possible regularizer, and it is stated with
+respect to an equal-weight macro that is itself initialization-anchored.
+Sixth, the mean-versus-maximum aggregation mismatch between solver and
+evaluator is identified but unrepaired.  Seventh, the \texttt{critical} score,
+defined as the minimum over families, is identically zero on our benchmark
+because some scene always zeroes some family; it currently has no
+discriminative power and should be replaced by a per-family floor or a
+quantile.  Eighth, the settling and centre-of-mass projection route remains
+disabled by design: it repairs vertical contact only if the object dimensions
+are already correct, and in three of five inspected scenes the settling target
+had both wrong identity and wrong size, so settling would anchor the error
+instead of removing it.  It may be reopened once retrieval scale is corrected.
+
+Our next operating point, V5-best, will run three cold starts and choose the
 best fully certified result.  Selection must use only test-time observable
-evidence and must report its roughly threefold upstream compute.  If schedule
+evidence and must report its roughly threefold upstream compute.  Because S1
+accounts for 69.6\% of cold S0--S3 compute, it---not the refinement
+stage---is the correct target for further end-to-end speedup; reducing
+\method{} or Fix114 time alone cannot deliver the largest gain.  If schedule
 permits, Flux fine-tuning will be evaluated afterward as a separate image-prior
 ablation, rather than silently altering the V5-fast benchmark.
 
@@ -458,15 +682,21 @@ in our 30-scene evaluation.  V5 replaces stochastic SA refinement with a typed,
 relation-conditioned $\mathrm{SO}(3)$ LM solver and executable no-harm
 certificates.  The resulting V5-fast backend raises physical quality by
 7.52 points over its frozen DeepSearch source while leaving that source's pose
-metrics essentially unchanged.  The broader lesson is that optimization and
-verification should share a typed relation contract: the solver may propose,
-but only witnessed, non-inferior components may commit.
+metrics essentially unchanged, at $3.513\times$ the speed of legacy S4 for its
+core solver.  A systematic budget study then shows that this operating point is
+already optimal, and explains why: early stopping functions as a trust region
+on the initialization, and the benchmark's equal family weighting makes further
+optimization negative-expectation.  The broader lesson is that optimization and
+verification should share a typed relation contract---the solver may propose,
+but only witnessed, non-inferior components may commit---and that the
+evaluation must be designed to reward the improvement one intends to measure.
 
 \paragraph{Acknowledgments.}
-This work builds on Imaginarium~\cite{zhu2025imaginarium}.  We thank Calvin Gu
-and the Tencent team for the DeepSearch asset-retrieval contribution integrated
-into the pipeline.  We will expand individual contributions and affiliations
-in the camera-ready version.
+This work builds on Imaginarium~\cite{zhu2025imaginarium}.  We thank our
+advisor and the Tencent team for the DeepSearch asset-retrieval contribution
+integrated into the pipeline, which indexes on the order of $10^5$ assets with
+sub-second query latency.  We will expand individual contributions and
+affiliations in the camera-ready version.
 
 \begin{thebibliography}{9}
 

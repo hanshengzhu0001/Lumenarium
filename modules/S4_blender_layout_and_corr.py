@@ -11324,6 +11324,18 @@ def layout(
                         boundary_points=boundary_point_tensor,
                         boundary_normals=boundary_normal_tensor,
                         iterations=optimization_iterations,
+                        semantic_weight=float(
+                            os.environ.get(
+                                "IMAGINARIUM_LAYOUTVLM_SEMANTIC_WEIGHT",
+                                "0.5",
+                            )
+                        ),
+                        warm_start_weight=float(
+                            os.environ.get(
+                                "IMAGINARIUM_SCENELM_WARM_START_WEIGHT",
+                                "0.01",
+                            )
+                        ),
                         restore_best_state=(
                             layoutvlm_stage in {"full", "depth"}
                         ),

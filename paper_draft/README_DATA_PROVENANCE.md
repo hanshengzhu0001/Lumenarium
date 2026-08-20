@@ -80,6 +80,46 @@ Do not mix this S4-only result with the approximately 1,425.9 seconds/scene V3
 full-chain reconstruction. Fix124 will supply the clean V5-fast full-chain
 runtime.
 
+## Iteration-budget frontier (frozen 2026-08-20)
+
+Five-scene subset (bedroom_01, livingroom_10, casino_01, official_01,
+streelitter_01) with frozen S3 source geometry and a single evaluator
+invocation. All arms use the second-order `v5_scenelm` solver; only the S4
+configuration varies.
+
+| S4 configuration | macro | coll | support | semantic |
+|---|---:|---:|---:|---:|
+| Fix61: 2 steps (default) | 0.6183 | 0.4301 | 0.5684 | 0.7634 |
+| 4 steps | 0.5782 | 0.4394 | 0.5459 | 0.5209 |
+| 8 steps | 0.5828 | 0.4436 | 0.5480 | 0.5210 |
+| 8 steps + yaw cap 3.75 deg | 0.6004 | 0.4380 | 0.5391 | 0.6741 |
+| 8 steps + yaw 3.75 deg + trans 0.05 m | 0.5799 | 0.4304 | 0.5495 | 0.5943 |
+| 8 steps + warm_start 0.3 | 0.5672 | 0.4130 | 0.5510 | 0.4563 |
+
+Plane is 0.7081 in every arm; it does not respond to the motions the solver can
+express. Fix61 remains the frozen baseline. A separate Paper30 run of the
+semantic-weight-1.0 plus 8-step configuration scored macro 0.5986 against
+Fix61's 0.6287 and was reverted.
+
+Second-order confirmation is on-disk, not inferred. The Fix61 output
+`*_placement_info_s4.json` carries `scenelm_solver` with
+`schema_version=scenelm_relation_manifold_v1`, `solver=v5_scenelm`,
+`maximum_iterations=2`, `executed_iterations=2`, `accepted_steps=1`,
+`rejected_steps=1`, `converged=false`. First-order Adam never writes this key.
+
+Claims that must stay qualified:
+
+- The budget conclusion is grid-bounded (step count, translation and rotation
+  caps, semantic weight, warm-start weight), not a statement about all
+  regularizers.
+- It is stated with respect to the equal-weight macro, which scores three
+  initialization-anchored families against one improvable family.
+- The solver aggregates semantic residuals by mean while the evaluator takes a
+  per-object maximum. The mismatch is a code fact; whether it is the principal
+  cause of the semantic drop was not isolated.
+- The horizontal footprint-containment residual is already present in the
+  objective with unit weight. An earlier claim that it was missing was wrong.
+
 ## Claims that must remain qualified
 
 - The large pose-AUC reduction is already present in V4-deepsearch and is not

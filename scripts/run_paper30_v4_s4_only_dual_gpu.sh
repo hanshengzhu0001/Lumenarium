@@ -15,6 +15,7 @@ s4_engine="${IMAGINARIUM_S4_ENGINE:-layoutvlm}"
 target_version="${IMAGINARIUM_S4_TARGET_VERSION:-v4}"
 max_contact_gap="${IMAGINARIUM_LAYOUTVLM_MAX_CONTACT_GAP:-0.5}"
 max_containment_error="${IMAGINARIUM_LAYOUTVLM_MAX_CONTAINMENT_ERROR:-0.5}"
+semantic_weight="${IMAGINARIUM_LAYOUTVLM_SEMANTIC_WEIGHT:-0.5}"
 depth_weight="${IMAGINARIUM_LAYOUTVLM_DEPTH_WEIGHT:-1.0}"
 depth_center_weight="${IMAGINARIUM_LAYOUTVLM_DEPTH_CENTER_WEIGHT:-1.0}"
 depth_size_weight="${IMAGINARIUM_LAYOUTVLM_DEPTH_SIZE_WEIGHT:-0.25}"
@@ -209,6 +210,7 @@ run_worker() {
             IMAGINARIUM_LAYOUTVLM_ITERATIONS="$iterations" \
             IMAGINARIUM_LAYOUTVLM_MAX_CONTACT_GAP="$max_contact_gap" \
             IMAGINARIUM_LAYOUTVLM_MAX_CONTAINMENT_ERROR="$max_containment_error" \
+            IMAGINARIUM_LAYOUTVLM_SEMANTIC_WEIGHT="$semantic_weight" \
             IMAGINARIUM_LAYOUTVLM_DEPTH_WEIGHT="$depth_weight" \
             IMAGINARIUM_LAYOUTVLM_DEPTH_CENTER_WEIGHT="$depth_center_weight" \
             IMAGINARIUM_LAYOUTVLM_DEPTH_SIZE_WEIGHT="$depth_size_weight" \

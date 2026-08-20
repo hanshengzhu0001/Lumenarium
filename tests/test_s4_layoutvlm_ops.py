@@ -1205,6 +1205,53 @@ class LayoutVLMPoseOpsTest(unittest.TestCase):
         self.assertTrue(torch.equal(final[:, :3, :3], base[:, :3, :3]))
         self.assertEqual(history[-1]["yaw_optimized"], 0.0)
 
+    def test_semantic_weight_scales_total_energy(self):
+        # Two objects separated by 2.0 along x while a distance constraint caps
+        # them at 1.5.  The semantic term is therefore a hinge violation, and
+        # its contribution to the total energy must scale with semantic_weight.
+        base = torch.eye(4, dtype=torch.float64).repeat(2, 1, 1)
+        base[1, 0, 3] = 2.0
+        corners = self.ops.local_box_corners(
+            torch.full((2, 3), -0.5, dtype=torch.float64),
+            torch.full((2, 3), 0.5, dtype=torch.float64),
+        )
+        empty_pairs = self.ops.pair_index_tensor([])
+        empty_indices = torch.empty((0,), dtype=torch.long)
+        empty_values = torch.empty((0,), dtype=torch.float64)
+        empty_points3 = torch.empty((0, 3), dtype=torch.float64)
+        empty_mask = torch.empty((0,), dtype=torch.bool)
+        distance_pairs = self.ops.pair_index_tensor([(0, 1)])
+        distance_min = torch.tensor([0.0], dtype=torch.float64)
+        distance_max = torch.tensor([1.5], dtype=torch.float64)
+
+        def total_at(weight):
+            _, history = self.ops.optimize_semantic_stage(
+                base,
+                corners,
+                empty_pairs,
+                empty_pairs,
+                empty_pairs,
+                empty_indices,
+                empty_values,
+                empty_indices,
+                empty_points3,
+                empty_points3,
+                empty_mask,
+                empty_pairs,
+                empty_values,
+                distance_pairs,
+                distance_min,
+                distance_max,
+                empty_pairs,
+                empty_values,
+                iterations=2,
+                solver="adam",
+                semantic_weight=weight,
+            )
+            return history[-1]["total"]
+
+        self.assertGreater(total_at(1.0), total_at(0.0))
+
     def test_scenelm_full_optimizer_persists_solver_certificate(self):
         base = torch.eye(4, dtype=torch.float64).repeat(2, 1, 1)
         base[0, 2, 3] = 1.5
