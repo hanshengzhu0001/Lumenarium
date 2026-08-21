@@ -350,6 +350,19 @@ tail -F \
   后续需要通过 pose recalibration/Flux fine-tuning 改进。
 - S1 场景图与视觉 API 延迟仍是最大的全链路性能瓶颈。
 
+## 复现与答辩材料
+
+| 文档 | 用途 |
+|---|---|
+| [`V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md`](V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md) | **复现从这里开始**：三档交付定义、每个相关文件与关键行号、冻结的 S4 配置、17 条实测踩坑与解法、最小复现路径 |
+| [`THESIS_DEFENSE_AND_INTERVIEW_NOTES.md`](THESIS_DEFENSE_AND_INTERVIEW_NOTES.md) | 设计思路、创新点、迭代预算负面结果的完整推理、预设答辩问答 |
+| [`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`](V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md) | 质量与速度权威数字 |
+| [`paper_draft/`](paper_draft/) | 论文初稿、PDF 与每个数字的出处说明 |
+| [`docs/SCENEBA_MATHEMATICAL_FORMULATION.md`](docs/SCENEBA_MATHEMATICAL_FORMULATION.md) | 数学形式化 |
+
+**S4 参数已冻结，请勿重新调参。** 迭代步数、平移/转角步长上限、语义权重、
+warm-start 权重四条路径均已实测关闭，全部低于 2 步基线，原因见上表第一份文档第 4 节。
+
 ---
 
 # English guide
@@ -856,9 +869,112 @@ are not used in the README headline.
 
 The V5-fast quality, runtime and provenance reports are stored in:
 
+- [`V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md`](V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md)
+  — **start here**: the three delivery profiles, every relevant file with line
+  references, the frozen S4 configuration, and 17 documented reproduction
+  pitfalls with fixes
 - [`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`](V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md)
 - [`SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md`](SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md)
+- [`THESIS_DEFENSE_AND_INTERVIEW_NOTES.md`](THESIS_DEFENSE_AND_INTERVIEW_NOTES.md)
+  — design rationale, the iteration-budget negative result, and what each
+  failure taught us
 - [`EVAL_DASHBOARD.ascii`](EVAL_DASHBOARD.ascii)
+
+### Step 1: reproduce the frozen Fix61 S4 stage
+
+`scripts/run_paper30_v4_s4_only_dual_gpu.sh` is the S4 runner that every
+experiment wraps. It reads its configuration exclusively from `IMAGINARIUM_*`
+environment variables; the values below are the frozen V5-fast operating point.
+
+```bash
+cd "$HOME/Lumenarium"
+V=v5_repro_fix61
+env IMAGINARIUM_PAPER30_MANIFEST=a10_reusable_results/paper30/manifest.txt \
+  IMAGINARIUM_PAPER30_RESULTS_ROOT=a10_reusable_results/paper30 \
+  IMAGINARIUM_S4_SOURCE_VERSION=v4_deepsearch \
+  IMAGINARIUM_S4_SOURCE_STAGE=S3_pose_inference \
+  IMAGINARIUM_S4_SOURCE_PATTERN='*_placement_info.json' \
+  IMAGINARIUM_S4_TARGET_VERSION="$V" \
+  IMAGINARIUM_S4_ENGINE=layoutvlm \
+  IMAGINARIUM_LAYOUTVLM_STAGE=full \
+  IMAGINARIUM_LAYOUTVLM_SOLVER=v5_scenelm \
+  IMAGINARIUM_LAYOUTVLM_ITERATIONS=2 \
+  IMAGINARIUM_LAYOUTVLM_SEMANTIC_WEIGHT=0.5 \
+  IMAGINARIUM_SCENELM_WARM_START_WEIGHT=0.01 \
+  IMAGINARIUM_LAYOUTVLM_ACTIVE_SET_ROUTER=0 \
+  IMAGINARIUM_SCENEPROOF_PROGRAM_IR=1 \
+  IMAGINARIUM_SCENEPROOF_REQUIRE_FACTOR_PARITY=1 \
+  IMAGINARIUM_SCENEPROOF_REQUIRE_BINDING_AUDIT=1 \
+  IMAGINARIUM_SCENEPROOF_SHADOW_JACOBIAN_OWNERSHIP=1 \
+  IMAGINARIUM_SCENEPROOF_STABLE_LINEARIZATIONS=2 \
+  IMAGINARIUM_SCENEPROOF_MATERIALIZED_WARM_START=1 \
+  IMAGINARIUM_GPU_FREE_FLOOR_MB=16000 \
+  IMAGINARIUM_S4_SCENE_TIMEOUT=3600 \
+  IMAGINARIUM_S4_WORKER_LOG_ROOT="logs/$V" \
+  bash scripts/run_paper30_v4_s4_only_dual_gpu.sh
+```
+
+**Check the banner before letting it finish.** It must print
+`TARGET_VERSION=v5_repro_fix61` and `ITERATIONS=2`. If either differs, an
+environment variable did not reach the runner; stop and fix it rather than
+trusting the output. Do not pass bare `TARGET_VERSION` or `ITERATIONS`: those
+names belong to a different wrapper script and are silently ignored here.
+
+### Step 2: verify the stage actually ran
+
+Workers skip scenes whose output directory already exists, so a short wall time
+plus familiar numbers can mean a cached no-op rather than a new result. Confirm
+all three signals:
+
+```bash
+cd "$HOME/Lumenarium"
+V=v5_repro_fix61
+f=$(ls a10_reusable_results/paper30/*_${V}_result/S4_layout_refinement/*_placement_info_s4.json | head -1)
+echo "FILE=[$f]"
+python - "$f" <<'PY'
+import datetime, json, os, sys
+path = sys.argv[1]
+record = json.load(open(path)).get("scenelm_solver")
+print("mtime =", datetime.datetime.fromtimestamp(os.path.getmtime(path)))
+if record is None:
+    print("ABSENT -> not a second-order run (or wrong file: use the _s4 suffix)")
+else:
+    keys = ("schema_version", "solver", "maximum_iterations",
+            "executed_iterations", "accepted_steps", "rejected_steps")
+    print({key: record[key] for key in keys})
+PY
+```
+
+Expected: `solver=v5_scenelm`, `schema_version=scenelm_relation_manifold_v1`,
+`maximum_iterations=2`, `executed_iterations=2`, and an `mtime` from the run you
+just launched. Note that `*_placement_info_s3.json` is the pre-optimization
+geometry snapshot and never carries solver diagnostics; only the `_s4` file
+does.
+
+### Step 3: score physical realizability
+
+```bash
+python eval_physical_realizability.py \
+  --saved-results a10_reusable_results/paper30 \
+  --scenes a10_reusable_results/paper30/manifest.txt \
+  --versions "v5_repro_fix61" \
+  --geometry-version v4_deepsearch \
+  --metrics-out /tmp/repro/physical.json \
+  --scene-csv /tmp/repro/physical_scenes.csv \
+  --object-csv /tmp/repro/physical_objects.csv \
+  --report-out /tmp/repro/physical.txt
+head -16 /tmp/repro/physical.txt
+```
+
+The human-readable table comes from `--report-out`; the top-level fields of
+`physical.json` are intentionally sparse, so read `physical.txt`. Passing a
+`--geometry-version` that has no `S4_layout_refinement` directory yields an
+empty table with `scenes=0` rather than an error.
+
+Expected Paper30 certified macro is approximately 0.6287. On the five-scene
+smoke subset the same configuration scores approximately 0.6183.
+
+### Step 4: full visual-safe evaluation (optional)
 
 Run the Visual-safe Paper30 evaluation from the frozen Fix61 cache:
 
@@ -883,6 +999,17 @@ The final report is written to:
 a10_reusable_results/paper30/sceneba_audit/
   v5_sceneproof_visual_safe_paper30_fix144/final_eval.json
 ```
+
+### Do not retune the S4 budget
+
+The iteration budget, per-step translation and rotation caps, semantic weight,
+and warm-start weight have all been measured and are frozen. Four independent
+attempts to spend more solver budget profitably all scored below the two-step
+baseline; the full table and the reason are in
+[`V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md`](V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md)
+section 4. Three of the four scored families are anchored to the S3
+initialization, so additional optimization is negative-expectation under the
+equal-weight macro.
 
 ## Scope and limitations
 

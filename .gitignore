@@ -11,6 +11,9 @@ __pycache__/
 .tools/
 _handoff_archive_*/
 
+# Local thesis/interview delivery bundle: rebuilt on demand, not versioned
+Lumenarium_thesis_portfolio_*.zip
+
 # ===== Data / models / third-party (large) =====
 asset_data/*
 weights/
