@@ -102,10 +102,10 @@ executable certificate: each accepted edit is backed by declared witnesses,
 checked physical and visual inequalities, and byte-safe rollback state.
 
 The final pipeline also integrates a DeepSearch retrieval path contributed by
-our advisor's team at Tencent.  DeepSearch is a production-grade asset
-retriever: it indexes a library on the order of $10^5$ assets and returns the
-most relevant candidates in under one second per query, which makes exhaustive
-per-object retrieval affordable inside an interactive pipeline.  This
+Calvin Gu and our advisor's team at Tencent.  DeepSearch is a production-grade
+asset retriever: it indexes a library on the order of $10^5$ assets and returns
+the most relevant candidates in under one second per query, which makes
+exhaustive per-object retrieval affordable inside an interactive pipeline.  This
 contribution is upstream of our \method{}/\proofsys{} backend and is attributed
 separately throughout the paper.
 Our cached results reveal an important distinction: DeepSearch preserves high
@@ -374,6 +374,121 @@ raising the warm-start weight $w_{\mathrm{ws}}$ in $E$ would let a larger
 budget succeed.  Neither holds, which is what promotes
 \eqref{eq:anchored} from a convenient story to the operative explanation.
 
+\subsection{Why smaller steps with a larger budget does not help}
+\label{sec:finesteps}
+
+The most natural objection to a two-step budget is that the step count and the
+step size should be traded against each other.  Classical optimization
+intuition says that halving the trust radius and doubling the iteration count
+is at worst neutral and usually beneficial: the iterate follows the descent
+flow of $E$ more faithfully, and for a nonlinear problem it should reach a
+\emph{lower} $E$ for the same total path length, in translation and in rotation
+alike.  We tested exactly this---$8$ steps at a $3.75^\circ$ yaw cap has the
+same $30^\circ$ total angular budget as $2$ steps at $15^\circ$, and adding a
+$0.05$~m translation cap matches the $0.40$~m total of two $0.20$~m steps---and
+the intuition fails in both cases (Table~\ref{tab:budget}).  The reason is
+instructive, and it is not that the solver misbehaves.
+
+First, the intuition is a statement about $E$, not about $M$.  Under the
+decomposition of \eqref{eq:anchored}, following the descent flow of $E$ more
+faithfully means arriving closer to $\arg\min_E$, and that point scores
+\emph{worse} under $M$ than the truncated iterate does.  Optimization fidelity
+and objective misalignment multiply: for a fixed misalignment, a more accurate
+optimizer loses more.  A finer discretization is therefore an improvement in
+solving the wrong problem more exactly.
+
+Second, equal total path length does not imply equal net displacement.
+\method{} re-linearizes at every iterate, so eight short steps track the
+curved descent path and accumulate in a consistent direction, whereas the
+two-step trajectory is truncated and, empirically, has its second step rejected
+by the gain-ratio test (\texttt{accepted}~$=1$, \texttt{rejected}~$=1$).  The
+budget-8 arms thus realize a \emph{larger} effective $\|T-\bar T\|$ than the
+budget-2 arm at the same nominal cap, which is the opposite of the intended
+control.
+
+Third, the per-step caps are not two independent line searches.  The LM step
+solves for translation and rotation jointly and the global trust scale rescales
+the whole step without changing its direction, so restricting one coordinate
+reallocates the remaining budget to the other.  This is directly visible in the
+data: capping yaw alone recovers $63\%$ of the semantic deficit but pushes
+support from $0.5480$ to $0.5391$, its worst value across all arms, because the
+freed budget is spent on translation that slides children off their parents.
+Capping both then removes the translation freedom that the
+\textsc{PointTowards} and \textsc{Distance} residuals need, and the recovered
+semantic score is lost again.  There is no interior sweet spot in this
+two-dimensional cap space, because the two caps are coupled through one trust
+region rather than separable.
+
+\subsection{Residual weights and family responsiveness}
+\label{sec:weights}
+
+Table~\ref{tab:weights} records the frozen weights of \eqref{eq:objective}
+together with the reason each was chosen and the empirically observed response
+of the corresponding evaluation family.  Two design principles govern the
+column of values.  \emph{Hard physical violations outrank soft preferences}:
+contact and plane attachment are weighted $2.0$ because a floating or
+interpenetrating object is unambiguously wrong and visually salient, whereas a
+$25^\circ$ heading error is a defensible interpretation of an ambiguous image.
+\emph{Noisy evidence is weighted below reliable evidence}: the semantic
+relations come from a language-model scene graph and are individually
+unreliable, so their weight is $0.5$; the warm start already encodes the image
+evidence recovered by S0--S3, so it needs only a $0.01$ anchor to prevent
+drift, and we verify in Section~\ref{sec:budget} that raising it to $0.3$ is
+actively harmful because it competes with the physical residuals for the same
+Gauss--Newton step.  Collision is held at $1.0$ rather than raised because it
+is the only pairwise term: its residual count grows quadratically with object
+count, so a larger weight would let dense scenes drown every per-object term.
+
+\begin{table}[t]
+\centering
+\caption{Frozen residual weights, the reason for each, and how the
+corresponding evaluation family responds to solver displacement.  Only
+collision has its optimum away from the warm start, which is why it is the only
+family that improves with additional budget.}
+\label{tab:weights}
+\small
+\begin{tabular}{@{}lcp{3.55cm}@{}}
+\toprule
+Term & $w$ & Rationale / observed family response \\
+\midrule
+contact & 2.0 & Vertical gap is a hard violation; floating is unambiguous.
+Family responds only through this term---the vertical component is held, the
+horizontal one is not. \\
+plane & 2.0 & Wall/ceiling detachment is hard and visually salient.
+\emph{Family is completely unresponsive}: $0.7081$ in every arm. \\
+collision & 1.0 & Pairwise, so count grows as $O(N^2)$; a higher weight would
+swamp per-object terms.  \emph{Only family that improves with budget}:
+$0.4301\!\to\!0.4436$. \\
+containment & 1.0 & Keeps the whole child footprint inside the parent, matching
+the evaluator rather than a centre-only test.  Insufficient alone to hold
+support: $0.5684\!\to\!0.5480$. \\
+boundary & 1.0 & Room containment; diagnostic only in the current benchmark
+because scene coverage is degenerate. \\
+semantic & 0.5 & Language-model relations are individually unreliable.
+\emph{Most sensitive family}: $0.7634\!\to\!0.5209$, and the collapse completes
+between two and four steps. \\
+orientation & 0.25 & Applies only to wall-attached objects; heading error is
+mild relative to interpenetration. \\
+warm start & 0.01 & Image evidence is already in $\bar T$; only drift
+prevention is needed.  Raising to $0.3$ degrades every family. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The right-hand column contains our most transferable measurement observation.
+The four evaluated families are not interchangeable proxies for ``physical
+quality''; they differ in whether solver displacement can help them at all.
+Plane is a pure S3 property under our motion model.  Support is
+three-component---vertical gap, horizontal containment, and footprint
+overlap---and only the vertical component has a strongly weighted residual, so
+budget spent on translation degrades it through the two horizontal components.
+Semantic is both anchored and aggregated adversarially: the evaluator takes a
+per-object maximum while the residual takes a mean, so a step that improves the
+average relation while worsening one relation per object is scored as a loss.
+Collision is the only family whose optimum lies away from $\bar T$.  Reporting
+a single macro average therefore hides the fact that three quarters of the
+score is measuring initialization fidelity.
+
 \section{Experimental Setup}
 
 \paragraph{Benchmark.}
@@ -510,15 +625,18 @@ cliff edge rather than the peak of a smooth curve.  Second, the collision
 family---the only one whose maximizer lies away from $\bar T$---does improve
 with budget (0.4301 to 0.4436), exactly as \eqref{eq:anchored} predicts, but
 its $\tfrac14$ weight cannot pay for the fidelity loss.  Third, both proposed
-rescues fail.  Reducing the per-step yaw cap from $15^\circ$ to $3.75^\circ$
-while raising the step count from two to eight holds the total angular budget
-fixed at $30^\circ$ and recovers only $63\%$ of the semantic deficit, while
-support degrades further because the trust region reallocates the step into
-translation; additionally tightening the translation cap to $0.05$~m loses the
-recovered semantic again.  Raising $w_{\mathrm{ws}}$ from $0.01$ to $0.3$ is
-worse than doing nothing.  We also verified that the horizontal
-footprint-containment residual is \emph{already} present in $E$ with unit
-weight, so the support degradation is not an omitted-term artifact.
+rescues fail, and their failure is the empirical content of
+Section~\ref{sec:finesteps}.  Holding the total angular budget fixed at
+$30^\circ$ while refining the discretization from $2\times15^\circ$ to
+$8\times3.75^\circ$ recovers only $63\%$ of the semantic deficit and drives
+support to its worst value across all arms, because the freed trust region is
+reallocated to translation; additionally matching the total translation budget
+at $8\times0.05$~m loses the recovered semantic again, because
+\textsc{PointTowards} and \textsc{Distance} need translation freedom to hold.
+Raising $w_{\mathrm{ws}}$ from $0.01$ to $0.3$ is worse than doing nothing.  We
+also verified that the horizontal footprint-containment residual is
+\emph{already} present in $E$ with unit weight, so the support degradation is
+not an omitted-term artifact.
 
 Two caveats bound this claim.  The comparison is over a step-count, step-cap,
 and weight grid, not over all conceivable regularizers; and the conclusion is
@@ -692,11 +810,11 @@ but only witnessed, non-inferior components may commit---and that the
 evaluation must be designed to reward the improvement one intends to measure.
 
 \paragraph{Acknowledgments.}
-This work builds on Imaginarium~\cite{zhu2025imaginarium}.  We thank our
-advisor and the Tencent team for the DeepSearch asset-retrieval contribution
-integrated into the pipeline, which indexes on the order of $10^5$ assets with
-sub-second query latency.  We will expand individual contributions and
-affiliations in the camera-ready version.
+This work builds on Imaginarium~\cite{zhu2025imaginarium}.  We thank Calvin Gu
+and our advisor's team at Tencent for the DeepSearch asset-retrieval
+contribution integrated into the pipeline, which indexes on the order of $10^5$
+assets with sub-second query latency.  We will expand individual contributions
+and affiliations in the camera-ready version.
 
 \begin{thebibliography}{9}
 
