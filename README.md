@@ -355,7 +355,6 @@ tail -F \
 | 文档 | 用途 |
 |---|---|
 | [`V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md`](V5_FINAL_ARCHITECTURE_AND_REPRODUCTION.md) | **复现从这里开始**：三档交付定义、每个相关文件与关键行号、冻结的 S4 配置、17 条实测踩坑与解法、最小复现路径 |
-| [`DEEPSEARCH_RETRIEVAL_GUIDE.md`](DEEPSEARCH_RETRIEVAL_GUIDE.md) | S2 检索链路：DeepSearch 请求契约、认证代理、ngrok、并发验证，以及 UE 侧盲区 |
 | [`THESIS_DEFENSE_AND_INTERVIEW_NOTES.md`](THESIS_DEFENSE_AND_INTERVIEW_NOTES.md) | 设计思路、创新点、迭代预算负面结果的完整推理、预设答辩问答 |
 | [`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`](V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md) | 质量与速度权威数字 |
 | [`paper_draft/`](paper_draft/) | 论文初稿、PDF 与每个数字的出处说明 |
@@ -874,10 +873,6 @@ The V5-fast quality, runtime and provenance reports are stored in:
   — **start here**: the three delivery profiles, every relevant file with line
   references, the frozen S4 configuration, and 17 documented reproduction
   pitfalls with fixes
-- [`DEEPSEARCH_RETRIEVAL_GUIDE.md`](DEEPSEARCH_RETRIEVAL_GUIDE.md)
-  — the S2 retrieval path: DeepSearch request contract, the JWT proxy, the
-  ngrok tunnel, concurrency verification, and the UE-side steps that live
-  outside this repository
 - [`V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md`](V5_FAST_FINAL_QUALITY_SPEED_REPORT_2026-08-13.md)
 - [`SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md`](SCENEPROOF_FINAL_EXPERIMENT_REASONING_2026-08-13.md)
 - [`THESIS_DEFENSE_AND_INTERVIEW_NOTES.md`](THESIS_DEFENSE_AND_INTERVIEW_NOTES.md)

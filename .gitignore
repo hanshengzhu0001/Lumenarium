@@ -14,6 +14,10 @@ _handoff_archive_*/
 # Local thesis/interview delivery bundle: rebuilt on demand, not versioned
 Lumenarium_thesis_portfolio_*.zip
 
+# Internal DeepSearch/UE/ngrok operations guide: ships in the delivery zip only,
+# not in the public repository (contains auth/ngrok internals)
+DEEPSEARCH_RETRIEVAL_GUIDE.md
+
 # ===== Data / models / third-party (large) =====
 asset_data/*
 weights/
